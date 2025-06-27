@@ -1,0 +1,77 @@
+openapi: 3.0.0
+info:
+  title: CloudFormation Generator API - Initial
+  version: 1.0.0
+  description: API for initiating asynchronous CloudFormation template generation
+servers:
+  - url: https://lambda.{region}.amazonaws.com/2015-03-31/functions/arn:aws:lambda:{region}:{account-id}:function:CFNGenerator-Initial-{environment}/invocations
+    description: Lambda function endpoint
+paths:
+  /generate:
+    post:
+      summary: Start CloudFormation template generation
+      description: Initiates the process of generating a CloudFormation template from resource configurations in an S3 bucket
+      operationId: startGeneration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerationRequest'
+      responses:
+        '202':
+          description: Generation process started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationResponse'
+        '400':
+          description: Invalid input parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    GenerationRequest:
+      type: object
+      required:
+        - bucket_name
+        - s3_folder
+      properties:
+        bucket_name:
+          type: string
+          description: S3 bucket containing resource configurations
+          example: my-resource-configs
+        s3_folder:
+          type: string
+          description: Folder path within the S3 bucket
+          example: resources/lambda
+    GenerationResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+          description: Unique identifier for the generation job
+          example: 12345678-abcd-1234-efgh-123456789012
+        status:
+          type: string
+          description: Status of the generation request
+          example: PROCESSING
+        message:
+          type: string
+          description: Detailed message about the generation request
+          example: CloudFormation template generation started. Use the job_id to check status.
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Error message
+          example: Invalid input parameters

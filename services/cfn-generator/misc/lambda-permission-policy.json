@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Id": "default",
+  "Statement": [
+    {
+      "Sid": "BedrockPermission",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "bedrock.amazonaws.com"
+      },
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:{region}:{account-id}:function:mainframe-modernization-doc-analyzer-agent-v1",
+      "Condition": {
+        "ArnLike": {
+          "AWS:SourceArn": "arn:aws:bedrock:{region}:{account-id}:agent/*"
+        }
+      }
+    }
+  ]
+}

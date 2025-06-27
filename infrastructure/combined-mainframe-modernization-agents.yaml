@@ -1,0 +1,1362 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Complete Mainframe Modernization Multi-Agent System - Deploys CloudFormation Generator, Mainframe Analyzer, and Supervisor agents'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Environment name for resource naming and configuration
+  
+  FoundationModel:
+    Type: String
+    Default: 'us.anthropic.claude-3-5-haiku-20241022-v1:0'
+    Description: Foundation model inference profile for all agents (cost-optimized)
+    AllowedValues:
+      - 'us.anthropic.claude-3-5-haiku-20241022-v1:0'
+      - 'anthropic.claude-3-sonnet-20240229-v1:0'
+      - 'anthropic.claude-3-haiku-20240307-v1:0'
+      - 'amazon.titan-text-express-v1'
+
+  IdleSessionTTL:
+    Type: Number
+    Default: 600
+    Description: Idle session timeout in seconds for all agents
+    MinValue: 60
+    MaxValue: 3600
+
+Resources:
+  # =============================================================================
+  # CLOUDFORMATION GENERATOR AGENT RESOURCES
+  # =============================================================================
+  
+  # IAM Role for CloudFormation Generator Agent
+  CfnGeneratorAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cfn-generator-agent-BedrockAgentRole-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      Policies:
+        - PolicyName: BedrockAgentExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: 
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock/agents/*'
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: 
+                  - !GetAtt CfnGeneratorFunction.Arn
+                  - !GetAtt CfnStatusCheckFunction.Arn
+
+  # Lambda Execution Role for CFN Generator
+  CfnLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource: 
+                  - 'arn:aws:s3:::*'
+                  - 'arn:aws:s3:::*/*'
+
+  # Lambda Function for CloudFormation Generation
+  CfnGeneratorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'cfn-generator-agent-CfnGenerator-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt CfnLambdaExecutionRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import uuid
+          import boto3
+          from datetime import datetime
+          
+          def lambda_handler(event, context):
+              """
+              Generate CloudFormation templates from S3 resource configurations
+              Expected parameters: bucket_name, s3_folder
+              """
+              try:
+                  # Parse input parameters
+                  parameters = event.get('parameters', [])
+                  bucket_name = None
+                  s3_folder = None
+                  
+                  for param in parameters:
+                      if param['name'] == 'bucket_name':
+                          bucket_name = param['value']
+                      elif param['name'] == 's3_folder':
+                          s3_folder = param['value']
+                  
+                  if not bucket_name or not s3_folder:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({
+                              'error': 'Missing required parameters: bucket_name and s3_folder'
+                          })
+                      }
+                  
+                  # Generate job ID
+                  job_id = str(uuid.uuid4())
+                  
+                  # For demo purposes, return success
+                  response = {
+                      'job_id': job_id,
+                      'status': 'STARTED',
+                      'message': f'CloudFormation template generation started for s3://{bucket_name}/{s3_folder}',
+                      'bucket_name': bucket_name,
+                      's3_folder': s3_folder,
+                      'start_time': datetime.utcnow().isoformat()
+                  }
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(response)
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({
+                          'error': str(e)
+                      })
+                  }
+
+  # Lambda Function for CFN Status Check
+  CfnStatusCheckFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'cfn-generator-agent-StatusCheck-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt CfnLambdaExecutionRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import random
+          from datetime import datetime, timedelta
+          
+          def lambda_handler(event, context):
+              """
+              Check status of CloudFormation template generation
+              Expected parameters: job_id
+              """
+              try:
+                  # Parse input parameters
+                  parameters = event.get('parameters', [])
+                  job_id = None
+                  
+                  for param in parameters:
+                      if param['name'] == 'job_id':
+                          job_id = param['value']
+                  
+                  if not job_id:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({
+                              'error': 'Missing required parameter: job_id'
+                          })
+                      }
+                  
+                  # For demo purposes, simulate different statuses
+                  statuses = ['PROCESSING', 'COMPLETED', 'FAILED']
+                  status = random.choice(statuses)
+                  
+                  if status == 'COMPLETED':
+                      response = {
+                          'job_id': job_id,
+                          'status': status,
+                          'message': 'CloudFormation template generation completed successfully',
+                          's3_location': f's3://cfn-generator-dev-{context.aws_request_id[:8]}-us-east-1/IaC/cloudformation_template_{job_id[:8]}.yaml',
+                          'zip_location': f's3://cfn-generator-dev-{context.aws_request_id[:8]}-us-east-1/Archive/cfn_template_{job_id[:8]}.zip',
+                          'config_zip_location': f's3://cfn-generator-dev-{context.aws_request_id[:8]}-us-east-1/Archive/config_files_{job_id[:8]}.zip',
+                          'end_time': datetime.utcnow().isoformat()
+                      }
+                  elif status == 'PROCESSING':
+                      response = {
+                          'job_id': job_id,
+                          'status': status,
+                          'message': 'CloudFormation template generation in progress',
+                          'progress': '60%',
+                          'current_stage': 'GENERATING_TEMPLATES'
+                      }
+                  else:  # FAILED
+                      response = {
+                          'job_id': job_id,
+                          'status': status,
+                          'message': 'CloudFormation template generation failed',
+                          'error': 'Unable to access S3 bucket or invalid resource configurations',
+                          'end_time': datetime.utcnow().isoformat()
+                      }
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(response)
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({
+                          'error': str(e)
+                      })
+                  }
+
+  # CloudWatch Log Group for CFN Generator Agent
+  CfnGeneratorAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/bedrock/agents/cfn-generator-agent-${Environment}'
+      RetentionInDays: 30
+  # CloudFormation Generator Bedrock Agent
+  CfnGeneratorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub 'cfn-generator-agent-${Environment}'
+      Description: 'This agent creates cloudformation templates based on user inputs'
+      FoundationModel: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      AgentResourceRoleArn: !GetAtt CfnGeneratorAgentRole.Arn
+      IdleSessionTTLInSeconds: !Ref IdleSessionTTL
+      Instruction: |
+        # Amazon Bedrock Agent Instructions for CloudFormation Generator
+
+        ## Agent Overview
+
+        You are the CloudFormation Generator Assistant, an AI agent designed to help AWS users generate CloudFormation templates from resource configurations stored in S3 buckets. You provide a conversational interface to an asynchronous template generation system that processes resource configurations and creates well-structured CloudFormation templates.
+
+        ## Core Capabilities
+
+        1. **Template Generation**: Initiate CloudFormation template generation from S3 resource configurations
+        2. **Status Tracking**: Monitor and report on the status of generation jobs
+        3. **Result Retrieval**: Provide access to generated templates and archived configurations
+        4. **Error Handling**: Explain errors and suggest troubleshooting steps
+
+        ## Conversation Flow
+
+        ### Initial Interaction
+
+        When a user first engages with you, introduce yourself briefly and explain your capabilities:
+
+        ```
+        Hello! I'm the CloudFormation Generator Assistant. I can help you generate CloudFormation templates from resource configurations stored in S3 buckets. Would you like to generate a new template or check the status of an existing job?
+        ```
+
+        ### Template Generation Request
+
+        When a user wants to generate a template:
+
+        1. **Collect Required Information**:
+           - S3 bucket name (required)
+           - S3 folder path (required)
+
+        2. **Validate Input**:
+           - Ensure the bucket name follows S3 naming conventions
+           - Ensure the folder path doesn't start with a slash
+
+        3. **Initiate Generation**:
+           - Call the Generate action with the provided parameters
+           - Store and prominently display the returned job ID
+
+        4. **Explain Next Steps**:
+           - Inform the user that processing has started
+           - Explain that generation may take several minutes
+           - Instruct the user on how to check status using the job ID
+
+        Example response:
+        ```
+        I've started generating a CloudFormation template for the resources in s3://your-bucket/your-folder.
+
+        Your job ID is: 12345678-abcd-1234-efgh-123456789012
+
+        The generation process is running asynchronously and may take several minutes depending on the complexity and number of resources. You can check the status anytime by asking me "What's the status of job 12345678-abcd-1234-efgh-123456789012?"
+        ```
+
+        ### Status Check Request
+
+        When a user asks about job status:
+
+        1. **Get Job ID**:
+           - Extract job ID from the user's message if provided
+           - If not provided, politely ask for the job ID
+
+        2. **Check Status**:
+           - Call the Status action with the job ID
+           - Interpret the status response
+
+        3. **Provide Status Update**:
+           - For PENDING/PROCESSING: Explain that the job is still running
+           - For COMPLETED: Provide links to the generated template and archives
+           - For FAILED: Explain the error and suggest troubleshooting steps
+
+        ## Best Practices
+
+        ### Do:
+
+        1. **Verify Input Parameters**:
+           - Always validate bucket names and folder paths before initiating generation
+           - Suggest corrections for common formatting errors
+
+        2. **Provide Clear Expectations**:
+           - Explain that template generation is asynchronous
+           - Set realistic expectations about processing time
+
+        3. **Be Helpful with Errors**:
+           - Explain errors in simple terms
+           - Suggest specific troubleshooting steps
+           - Offer to help with retrying the generation
+
+        4. **Follow Up Appropriately**:
+           - If a user mentions they're waiting for a job, offer to check the status
+           - If a job completes, explain how to use the generated template
+
+        ### Don't:
+
+        1. **Don't Make Assumptions**:
+           - Don't assume the user knows how to access S3 locations
+           - Don't assume the user understands CloudFormation concepts
+
+        2. **Don't Provide Incorrect Information**:
+           - If you're unsure about a job status, check it rather than guessing
+           - Don't promise immediate results for an asynchronous process
+
+        3. **Don't Ignore Context**:
+           - If a user has already provided a job ID, don't ask for it again
+           - Remember details about the user's generation job throughout the conversation
+
+        ## Technical Details
+
+        ### Action Groups
+
+        You have access to two action groups:
+
+        1. **Generate Action Group**:
+           - Purpose: Start CloudFormation template generation
+           - Required parameters: bucket_name, s3_folder
+           - Returns: job_id, status, message
+
+        2. **Status Action Group**:
+           - Purpose: Check status of generation jobs
+           - Required parameters: job_id
+           - Returns: job_id, status, message, s3_location, zip_location, config_zip_location, start_time, end_time
+
+        ### Status Codes
+
+        Interpret these status codes as follows:
+
+        - **PENDING**: Job has been created but processing hasn't started yet
+        - **PROCESSING**: Job is actively being processed
+        - **COMPLETED**: Job has finished successfully
+        - **FAILED**: Job encountered an error and couldn't complete
+
+        As the CloudFormation Generator Assistant, your primary goal is to provide a helpful, informative, and professional experience for users generating CloudFormation templates. Always be clear about the asynchronous nature of the process, provide accurate status updates, and offer assistance with any errors or issues that arise.
+
+        Remember to maintain context throughout the conversation, be proactive in offering help, and guide users through the entire process from template generation to retrieval of the final results.
+      ActionGroups:
+        - ActionGroupName: 'CfnGeneratorActions'
+          Description: 'Generate CloudFormation templates from S3 resource configurations'
+          ActionGroupExecutor:
+            Lambda: !GetAtt CfnGeneratorFunction.Arn
+          ApiSchema:
+            Payload: |
+              {
+                "openapi": "3.0.0",
+                "info": {
+                  "title": "CloudFormation Generator API",
+                  "version": "1.0.0",
+                  "description": "API to generate CloudFormation templates from S3 configurations"
+                },
+                "paths": {
+                  "/generate-template": {
+                    "post": {
+                      "summary": "Generate CloudFormation template",
+                      "description": "Initiates asynchronous CloudFormation template generation from S3 resource configurations",
+                      "operationId": "generateTemplate",
+                      "requestBody": {
+                        "required": true,
+                        "content": {
+                          "application/json": {
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "bucket_name": {
+                                  "type": "string",
+                                  "description": "Name of the S3 bucket containing resource configurations"
+                                },
+                                "s3_folder": {
+                                  "type": "string",
+                                  "description": "Folder path within the S3 bucket"
+                                }
+                              },
+                              "required": ["bucket_name", "s3_folder"]
+                            }
+                          }
+                        }
+                      },
+                      "responses": {
+                        "200": {
+                          "description": "Template generation started successfully"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+        - ActionGroupName: 'StatusCheckAction'
+          Description: 'Check status of CloudFormation template generation jobs'
+          ActionGroupExecutor:
+            Lambda: !GetAtt CfnStatusCheckFunction.Arn
+          ApiSchema:
+            Payload: |
+              {
+                "openapi": "3.0.0",
+                "info": {
+                  "title": "Status Check API",
+                  "version": "1.0.0",
+                  "description": "API to check CloudFormation template generation job status"
+                },
+                "paths": {
+                  "/check-status": {
+                    "post": {
+                      "summary": "Check generation job status",
+                      "description": "Retrieves the current status of a CloudFormation template generation job",
+                      "operationId": "checkStatus",
+                      "requestBody": {
+                        "required": true,
+                        "content": {
+                          "application/json": {
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "job_id": {
+                                  "type": "string",
+                                  "description": "Unique identifier for the generation job"
+                                }
+                              },
+                              "required": ["job_id"]
+                            }
+                          }
+                        }
+                      },
+                      "responses": {
+                        "200": {
+                          "description": "Status retrieved successfully"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Lambda Permissions for CFN Generator Agent
+  CfnGeneratorLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CfnGeneratorFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  CfnStatusCheckLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CfnStatusCheckFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  # CFN Generator Agent Alias
+  CfnGeneratorAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref CfnGeneratorAgent
+      AgentAliasName: !Sub 'cfn-generator-${Environment}'
+      Description: !Sub 'CloudFormation Generator agent alias for ${Environment} environment'
+      RoutingConfiguration:
+        - AgentVersion: 'DRAFT'
+
+  # =============================================================================
+  # MAINFRAME ANALYZER AGENT RESOURCES
+  # =============================================================================
+  
+  # IAM Role for Mainframe Analyzer Agent
+  MainframeAnalyzerAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'MainframeAnalyzerAgent-Async-BedrockAgentRole-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      Policies:
+        - PolicyName: BedrockAgentExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: 
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock/agents/*'
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: 
+                  - !GetAtt StartAnalysisFunction.Arn
+                  - !GetAtt CheckStatusFunction.Arn
+
+  # Lambda Execution Role for Mainframe Analyzer
+  MainframeLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource: 
+                  - 'arn:aws:s3:::*'
+                  - 'arn:aws:s3:::*/*'
+
+  # Lambda Function for StartAnalysis Action
+  StartAnalysisFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'MainframeAnalyzerAgent-Async-StartAnalysis-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt MainframeLambdaExecutionRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import uuid
+          import boto3
+          from datetime import datetime
+          
+          def lambda_handler(event, context):
+              """
+              Start analysis of mainframe documentation in S3
+              Expected parameters: bucket_name, s3_folder
+              """
+              try:
+                  # Parse input parameters
+                  parameters = event.get('parameters', [])
+                  bucket_name = None
+                  s3_folder = None
+                  
+                  for param in parameters:
+                      if param['name'] == 'bucket_name':
+                          bucket_name = param['value']
+                      elif param['name'] == 's3_folder':
+                          s3_folder = param['value']
+                  
+                  if not bucket_name or not s3_folder:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({
+                              'error': 'Missing required parameters: bucket_name and s3_folder'
+                          })
+                      }
+                  
+                  # Generate job ID
+                  job_id = str(uuid.uuid4())
+                  
+                  # For demo purposes, return success
+                  response = {
+                      'job_id': job_id,
+                      'status': 'STARTED',
+                      'message': f'Analysis started for s3://{bucket_name}/{s3_folder}',
+                      'bucket_name': bucket_name,
+                      's3_folder': s3_folder,
+                      'start_time': datetime.utcnow().isoformat()
+                  }
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(response)
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({
+                          'error': str(e)
+                      })
+                  }
+
+  # Lambda Function for CheckStatus Action
+  CheckStatusFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'MainframeAnalyzerAgent-Async-CheckStatus-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt MainframeLambdaExecutionRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import random
+          from datetime import datetime, timedelta
+          
+          def lambda_handler(event, context):
+              """
+              Check status of mainframe documentation analysis
+              Expected parameters: job_id
+              """
+              try:
+                  # Parse input parameters
+                  parameters = event.get('parameters', [])
+                  job_id = None
+                  
+                  for param in parameters:
+                      if param['name'] == 'job_id':
+                          job_id = param['value']
+                  
+                  if not job_id:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({
+                              'error': 'Missing required parameter: job_id'
+                          })
+                      }
+                  
+                  # For demo purposes, simulate different statuses
+                  statuses = ['PROCESSING', 'COMPLETED', 'FAILED']
+                  status = random.choice(statuses)
+                  
+                  if status == 'COMPLETED':
+                      response = {
+                          'job_id': job_id,
+                          'status': status,
+                          'message': 'Analysis completed successfully',
+                          'results_location': f's3://mainframe-analysis-results/{job_id}/',
+                          'files_processed': 15,
+                          'recommendations_generated': 8,
+                          'end_time': datetime.utcnow().isoformat()
+                      }
+                  elif status == 'PROCESSING':
+                      response = {
+                          'job_id': job_id,
+                          'status': status,
+                          'message': 'Analysis in progress',
+                          'files_processed': 8,
+                          'total_files': 15,
+                          'current_stage': 'ANALYZING'
+                      }
+                  else:  # FAILED
+                      response = {
+                          'job_id': job_id,
+                          'status': status,
+                          'message': 'Analysis failed',
+                          'error': 'Unable to access S3 bucket or invalid file format',
+                          'end_time': datetime.utcnow().isoformat()
+                      }
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(response)
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({
+                          'error': str(e)
+                      })
+                  }
+
+  # CloudWatch Log Group for Mainframe Analyzer Agent
+  MainframeAnalyzerAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/bedrock/agents/MainframeAnalyzerAgent-Async-${Environment}'
+      RetentionInDays: 30
+  # Mainframe Analyzer Bedrock Agent
+  MainframeAnalyzerAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub 'MainframeAnalyzerAgent-Async-${Environment}'
+      Description: 'This agent analyzes mainframe documentation and provides modernization recommendations'
+      FoundationModel: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      AgentResourceRoleArn: !GetAtt MainframeAnalyzerAgentRole.Arn
+      IdleSessionTTLInSeconds: !Ref IdleSessionTTL
+      Instruction: |
+        # Amazon Bedrock Agent Instructions for Mainframe Documentation Analyzer
+
+        ## Agent Overview
+
+        You are the Mainframe Documentation Analyzer Assistant, an AI agent designed to help organizations analyze their mainframe documentation and provide modernization recommendations. You provide a conversational interface to an asynchronous analysis system that processes mainframe documentation stored in S3 buckets and generates comprehensive modernization insights.
+
+        ## Core Capabilities
+
+        1. **Documentation Analysis**: Initiate analysis of mainframe documentation from S3 buckets
+        2. **Status Tracking**: Monitor and report on the status of analysis jobs
+        3. **Modernization Recommendations**: Provide insights and recommendations based on analysis results
+        4. **Error Handling**: Explain errors and suggest troubleshooting steps
+
+        ## Conversation Flow
+
+        ### Initial Interaction
+
+        When a user first engages with you, introduce yourself briefly and explain your capabilities:
+
+        ```
+        Hello! I'm the Mainframe Documentation Analyzer Assistant. I can help you analyze mainframe documentation stored in S3 buckets and provide modernization recommendations. Would you like to start a new analysis or check the status of an existing job?
+        ```
+
+        ### Analysis Request
+
+        When a user wants to start an analysis:
+
+        1. **Collect Required Information**:
+           - S3 bucket name (required)
+           - S3 folder path (required)
+
+        2. **Validate Input**:
+           - Ensure the bucket name follows S3 naming conventions
+           - Ensure the folder path doesn't start with a slash
+
+        3. **Initiate Analysis**:
+           - Call the StartAnalysis action with the provided parameters
+           - Store and prominently display the returned job ID
+
+        4. **Explain Next Steps**:
+           - Inform the user that processing has started
+           - Explain that analysis may take several minutes depending on document volume
+           - Instruct the user on how to check status using the job ID
+
+        Example response:
+        ```
+        I've started analyzing the mainframe documentation in s3://your-bucket/your-folder.
+
+        Your job ID is: 12345678-abcd-1234-efgh-123456789012
+
+        The analysis process is running asynchronously and may take several minutes depending on the volume and complexity of your documentation. You can check the status anytime by asking me "What's the status of job 12345678-abcd-1234-efgh-123456789012?"
+        ```
+
+        ### Status Check Request
+
+        When a user asks about job status:
+
+        1. **Get Job ID**:
+           - Extract job ID from the user's message if provided
+           - If not provided, politely ask for the job ID
+
+        2. **Check Status**:
+           - Call the CheckStatus action with the job ID
+           - Interpret the status response
+
+        3. **Provide Status Update**:
+           - For PROCESSING: Explain current progress and what's being analyzed
+           - For COMPLETED: Provide summary of results and recommendations
+           - For FAILED: Explain the error and suggest troubleshooting steps
+
+        ## Analysis Results Interpretation
+
+        When an analysis is completed, help users understand the results:
+
+        ### Modernization Recommendations
+
+        Based on the analysis results, provide guidance on:
+
+        1. **Application Modernization**:
+           - Identify applications suitable for cloud migration
+           - Suggest modernization patterns (rehost, refactor, rebuild)
+           - Highlight dependencies and integration points
+
+        2. **Technology Stack Updates**:
+           - Recommend modern alternatives to legacy technologies
+           - Suggest cloud-native services that can replace mainframe components
+           - Identify opportunities for containerization
+
+        3. **Data Migration Strategies**:
+           - Analyze data structures and recommend migration approaches
+           - Identify data transformation requirements
+           - Suggest modern data storage solutions
+
+        4. **Risk Assessment**:
+           - Highlight potential migration risks
+           - Suggest mitigation strategies
+           - Recommend phased migration approaches
+
+        ## Best Practices
+
+        ### Do:
+
+        1. **Verify Input Parameters**:
+           - Always validate bucket names and folder paths before initiating analysis
+           - Suggest corrections for common formatting errors
+
+        2. **Provide Clear Expectations**:
+           - Explain that analysis is asynchronous
+           - Set realistic expectations about processing time
+           - Explain what types of documents are analyzed
+
+        3. **Be Helpful with Results**:
+           - Summarize key findings in accessible language
+           - Prioritize recommendations by impact and feasibility
+           - Offer to explain technical concepts in simpler terms
+
+        4. **Follow Up Appropriately**:
+           - If a user mentions they're waiting for results, offer to check the status
+           - If analysis completes, proactively explain the key findings
+
+        ### Don't:
+
+        1. **Don't Make Assumptions**:
+           - Don't assume the user understands mainframe concepts
+           - Don't assume the user knows how to access S3 locations
+           - Don't assume the user's technical background
+
+        2. **Don't Provide Incorrect Information**:
+           - If you're unsure about an analysis status, check it rather than guessing
+           - Don't promise immediate results for an asynchronous process
+
+        3. **Don't Ignore Context**:
+           - If a user has already provided a job ID, don't ask for it again
+           - Remember details about the user's analysis throughout the conversation
+
+        ## Technical Details
+
+        ### Action Groups
+
+        You have access to two action groups:
+
+        1. **StartAnalysis Action Group**:
+           - Purpose: Start mainframe documentation analysis
+           - Required parameters: bucket_name, s3_folder
+           - Returns: job_id, status, message
+
+        2. **CheckStatus Action Group**:
+           - Purpose: Check status of analysis jobs
+           - Required parameters: job_id
+           - Returns: job_id, status, message, results_location, files_processed, recommendations_generated
+
+        ### Status Codes
+
+        Interpret these status codes as follows:
+
+        - **STARTED**: Analysis job has been created and queued
+        - **PROCESSING**: Analysis is actively running
+        - **COMPLETED**: Analysis has finished successfully
+        - **FAILED**: Analysis encountered an error and couldn't complete
+
+        ### Document Types Analyzed
+
+        The system can analyze various mainframe documentation types:
+
+        - COBOL program documentation
+        - JCL job control language files
+        - CICS transaction definitions
+        - DB2 database schemas
+        - System configuration files
+        - Application architecture documents
+        - Data flow diagrams
+        - Business process documentation
+
+        As the Mainframe Documentation Analyzer Assistant, your primary goal is to help organizations understand their mainframe systems and plan successful modernization initiatives. Always be clear about the asynchronous nature of the analysis process, provide accurate status updates, and offer meaningful insights based on the analysis results.
+
+        Remember to maintain context throughout the conversation, be proactive in offering help, and guide users through the entire process from analysis initiation to understanding and acting on the recommendations.
+      ActionGroups:
+        - ActionGroupName: 'StartAnalysis'
+          Description: 'Start analysis of mainframe documentation in S3'
+          ActionGroupExecutor:
+            Lambda: !GetAtt StartAnalysisFunction.Arn
+          ApiSchema:
+            Payload: |
+              {
+                "openapi": "3.0.0",
+                "info": {
+                  "title": "Mainframe Analysis API",
+                  "version": "1.0.0",
+                  "description": "API to analyze mainframe documentation"
+                },
+                "paths": {
+                  "/start-analysis": {
+                    "post": {
+                      "summary": "Start mainframe documentation analysis",
+                      "description": "Initiates asynchronous analysis of mainframe documentation from S3",
+                      "operationId": "startAnalysis",
+                      "requestBody": {
+                        "required": true,
+                        "content": {
+                          "application/json": {
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "bucket_name": {
+                                  "type": "string",
+                                  "description": "Name of the S3 bucket containing mainframe documentation"
+                                },
+                                "s3_folder": {
+                                  "type": "string",
+                                  "description": "Folder path within the S3 bucket"
+                                }
+                              },
+                              "required": ["bucket_name", "s3_folder"]
+                            }
+                          }
+                        }
+                      },
+                      "responses": {
+                        "200": {
+                          "description": "Analysis started successfully"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+        - ActionGroupName: 'CheckStatus'
+          Description: 'Check status of mainframe documentation analysis jobs'
+          ActionGroupExecutor:
+            Lambda: !GetAtt CheckStatusFunction.Arn
+          ApiSchema:
+            Payload: |
+              {
+                "openapi": "3.0.0",
+                "info": {
+                  "title": "Status Check API",
+                  "version": "1.0.0",
+                  "description": "API to check mainframe analysis job status"
+                },
+                "paths": {
+                  "/check-status": {
+                    "post": {
+                      "summary": "Check analysis job status",
+                      "description": "Retrieves the current status of a mainframe documentation analysis job",
+                      "operationId": "checkStatus",
+                      "requestBody": {
+                        "required": true,
+                        "content": {
+                          "application/json": {
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "job_id": {
+                                  "type": "string",
+                                  "description": "Unique identifier for the analysis job"
+                                }
+                              },
+                              "required": ["job_id"]
+                            }
+                          }
+                        }
+                      },
+                      "responses": {
+                        "200": {
+                          "description": "Status retrieved successfully"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Lambda Permissions for Mainframe Analyzer Agent
+  StartAnalysisLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StartAnalysisFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  CheckStatusLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CheckStatusFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  # Mainframe Analyzer Agent Alias
+  MainframeAnalyzerAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref MainframeAnalyzerAgent
+      AgentAliasName: !Sub 'mainframe-analyzer-${Environment}'
+      Description: !Sub 'Mainframe Analyzer agent alias for ${Environment} environment'
+      RoutingConfiguration:
+        - AgentVersion: 'DRAFT'
+
+  # =============================================================================
+  # SUPERVISOR AGENT RESOURCES
+  # =============================================================================
+  
+  # IAM Role for Supervisor Agent
+  SupervisorAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'SupervisorAgent-BedrockAgentRole-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      Policies:
+        - PolicyName: BedrockAgentExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: 
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock/agents/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeAgent
+                Resource: 
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  # CloudWatch Log Group for Supervisor Agent
+  SupervisorAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/bedrock/agents/SupervisorAgent-${Environment}'
+      RetentionInDays: 30
+
+  # Supervisor Bedrock Agent
+  SupervisorAgent:
+    Type: AWS::Bedrock::Agent
+    DependsOn:
+      - CfnGeneratorAgent
+      - MainframeAnalyzerAgent
+    Properties:
+      AgentName: !Sub 'SupervisorAgent-${Environment}'
+      Description: 'Supervisor agent that coordinates between CloudFormation Generator and Mainframe Analyzer agents'
+      FoundationModel: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      AgentResourceRoleArn: !GetAtt SupervisorAgentRole.Arn
+      IdleSessionTTLInSeconds: !Ref IdleSessionTTL
+      AgentCollaboration: SUPERVISOR_ROUTER
+      Instruction: |
+        # Amazon Bedrock Supervisor Agent Instructions
+
+        ## Agent Overview
+
+        You are the Supervisor Agent for the Mainframe Modernization Assistant system. Your primary role is to coordinate between specialized sub-agents to provide comprehensive mainframe modernization assistance. You act as the main interface for users and intelligently route requests to the appropriate specialized agents based on the user's needs.
+
+        ## Available Sub-Agents
+
+        You have access to two specialized sub-agents:
+
+        ### 1. CloudFormation Generator Agent
+        - **Purpose**: Generates CloudFormation templates from resource configurations stored in S3
+        - **Capabilities**: 
+          - Initiates template generation from S3 buckets
+          - Tracks generation job status
+          - Provides access to generated templates
+        - **Use When**: Users want to create CloudFormation templates from existing resource configurations
+
+        ### 2. Mainframe Documentation Analyzer Agent
+        - **Purpose**: Analyzes mainframe documentation and provides modernization recommendations
+        - **Capabilities**:
+          - Analyzes mainframe documentation from S3 buckets
+          - Provides modernization recommendations
+          - Tracks analysis job status
+        - **Use When**: Users want to analyze mainframe systems for modernization planning
+
+        ## Routing Logic
+
+        ### CloudFormation Generation Requests
+        Route to the CloudFormation Generator Agent when users:
+        - Want to generate CloudFormation templates
+        - Mention "CloudFormation", "CFN", "template generation"
+        - Have resource configurations they want to convert to templates
+        - Ask about infrastructure as code
+        - Want to check status of template generation jobs
+
+        ### Mainframe Analysis Requests
+        Route to the Mainframe Documentation Analyzer Agent when users:
+        - Want to analyze mainframe documentation
+        - Mention "mainframe analysis", "modernization recommendations"
+        - Have mainframe documentation they want to assess
+        - Ask about migration strategies or modernization planning
+        - Want to check status of analysis jobs
+
+        ### General or Ambiguous Requests
+        When requests are unclear or could apply to both agents:
+        1. Ask clarifying questions to understand the user's specific needs
+        2. Explain the capabilities of both agents
+        3. Help the user choose the appropriate service
+
+        ## Conversation Flow
+
+        ### Initial Interaction
+        When a user first engages with you, provide a welcoming introduction that explains your role and the available services:
+
+        ```
+        Hello! I'm the Mainframe Modernization Supervisor Assistant. I coordinate between specialized agents to help you with:
+
+        1. **CloudFormation Template Generation** - Convert resource configurations from S3 into CloudFormation templates
+        2. **Mainframe Documentation Analysis** - Analyze mainframe documentation and provide modernization recommendations
+
+        What would you like to help you with today?
+        ```
+
+        ### Request Processing
+        1. **Analyze the Request**: Determine which sub-agent is most appropriate
+        2. **Route Appropriately**: Direct the conversation to the relevant sub-agent
+        3. **Provide Context**: When routing, briefly explain why you're connecting them to that specific agent
+        4. **Monitor Progress**: Stay engaged to help with any follow-up questions or additional routing needs
+
+        ### Multi-Agent Workflows
+        Some user requests might benefit from both agents:
+        1. **Sequential Processing**: Guide users through using both agents in logical order
+        2. **Cross-Reference Results**: Help users understand how results from one agent might inform the use of the other
+        3. **Comprehensive Planning**: Assist in creating complete modernization strategies using insights from both agents
+
+        ## Best Practices
+
+        ### Do:
+        1. **Be Clear About Routing**: Always explain why you're connecting the user to a specific agent
+        2. **Maintain Context**: Remember previous interactions and job IDs throughout the conversation
+        3. **Provide Value-Added Coordination**: Help users understand how different services work together
+        4. **Ask Clarifying Questions**: When requests are ambiguous, ask specific questions to route correctly
+        5. **Follow Up**: Check if users need additional assistance after sub-agent interactions
+
+        ### Don't:
+        1. **Don't Duplicate Functionality**: Let the specialized agents handle their specific tasks
+        2. **Don't Make Assumptions**: If unclear, ask rather than guessing which agent to use
+        3. **Don't Lose Context**: Keep track of ongoing jobs and previous interactions
+        4. **Don't Over-Complicate**: Keep routing decisions simple and transparent
+
+        ## Example Routing Scenarios
+
+        ### Scenario 1: CloudFormation Request
+        **User**: "I have some AWS resource configurations in S3 and want to create CloudFormation templates"
+        **Response**: "I'll connect you with the CloudFormation Generator Agent, which specializes in converting S3 resource configurations into CloudFormation templates. This agent can help you start the generation process and track the job status."
+
+        ### Scenario 2: Mainframe Analysis Request
+        **User**: "I need to analyze our mainframe documentation for modernization planning"
+        **Response**: "I'll connect you with the Mainframe Documentation Analyzer Agent, which specializes in analyzing mainframe systems and providing modernization recommendations. This agent can process your documentation and provide detailed insights."
+
+        ### Scenario 3: Ambiguous Request
+        **User**: "I want help with mainframe modernization"
+        **Response**: "I can help you with mainframe modernization in two ways:
+        1. **Documentation Analysis** - Analyze your existing mainframe documentation to understand your current system and get modernization recommendations
+        2. **CloudFormation Generation** - Convert resource configurations into CloudFormation templates for infrastructure as code
+
+        Which aspect would you like to start with, or would you like more details about either option?"
+
+        ## Collaboration Instructions
+
+        When working with sub-agents:
+        1. **Provide Clear Context**: Give sub-agents relevant background about the user's request
+        2. **Maintain Session Continuity**: Help users understand the relationship between different agent interactions
+        3. **Coordinate Follow-ups**: If one agent's results inform the use of another, facilitate that connection
+        4. **Summarize When Helpful**: Provide summaries of multi-agent interactions when beneficial
+
+        Your role as the Supervisor Agent is to ensure users get the most appropriate and effective assistance for their mainframe modernization needs. Always prioritize user experience and make the interaction with multiple specialized agents feel seamless and coordinated.
+      AgentCollaborators:
+        - AgentId: !Ref CfnGeneratorAgent
+          AgentVersion: 'DRAFT'
+          CollaborationInstruction: |
+            This agent specializes in generating CloudFormation templates from resource configurations stored in S3 buckets. 
+            
+            Route users to this agent when they:
+            - Want to generate CloudFormation templates
+            - Have resource configurations in S3 they want to convert
+            - Need to check the status of template generation jobs
+            - Ask about infrastructure as code or CloudFormation
+            
+            When routing to this agent, provide context about:
+            - The user's S3 bucket and folder information if available
+            - Any specific requirements for the CloudFormation templates
+            - Whether this is a new generation request or status check
+        - AgentId: !Ref MainframeAnalyzerAgent
+          AgentVersion: 'DRAFT'
+          CollaborationInstruction: |
+            This agent specializes in analyzing mainframe documentation and providing modernization recommendations.
+            
+            Route users to this agent when they:
+            - Want to analyze mainframe documentation
+            - Need modernization recommendations
+            - Have mainframe systems they want to assess for cloud migration
+            - Need to check the status of analysis jobs
+            
+            When routing to this agent, provide context about:
+            - The user's S3 bucket and folder containing mainframe documentation
+            - The type of mainframe systems or documentation they have
+            - Their modernization goals or timeline if mentioned
+            - Whether this is a new analysis request or status check
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Supervisor Agent Alias
+  SupervisorAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref SupervisorAgent
+      AgentAliasName: !Sub 'supervisor-${Environment}'
+      Description: !Sub 'Supervisor agent alias for ${Environment} environment'
+      RoutingConfiguration:
+        - AgentVersion: 'DRAFT'
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+
+Outputs:
+  SupervisorAgentId:
+    Description: 'ID of the Supervisor Bedrock Agent'
+    Value: !Ref SupervisorAgent
+    Export:
+      Name: !Sub '${AWS::StackName}-SupervisorAgentId'
+
+  SupervisorAgentAliasId:
+    Description: 'ID of the Supervisor Agent Alias'
+    Value: !Ref SupervisorAgentAlias
+    Export:
+      Name: !Sub '${AWS::StackName}-SupervisorAgentAliasId'
+
+  CfnGeneratorAgentId:
+    Description: 'ID of the CloudFormation Generator Bedrock Agent'
+    Value: !Ref CfnGeneratorAgent
+    Export:
+      Name: !Sub '${AWS::StackName}-CfnGeneratorAgentId'
+
+  CfnGeneratorAgentAliasId:
+    Description: 'ID of the CloudFormation Generator Agent Alias'
+    Value: !Ref CfnGeneratorAgentAlias
+    Export:
+      Name: !Sub '${AWS::StackName}-CfnGeneratorAgentAliasId'
+
+  MainframeAnalyzerAgentId:
+    Description: 'ID of the Mainframe Analyzer Bedrock Agent'
+    Value: !Ref MainframeAnalyzerAgent
+    Export:
+      Name: !Sub '${AWS::StackName}-MainframeAnalyzerAgentId'
+
+  MainframeAnalyzerAgentAliasId:
+    Description: 'ID of the Mainframe Analyzer Agent Alias'
+    Value: !Ref MainframeAnalyzerAgentAlias
+    Export:
+      Name: !Sub '${AWS::StackName}-MainframeAnalyzerAgentAliasId'
+
+  CfnGeneratorFunctionArn:
+    Description: 'ARN of the CloudFormation Generator Lambda Function'
+    Value: !GetAtt CfnGeneratorFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CfnGeneratorFunctionArn'
+
+  CfnStatusCheckFunctionArn:
+    Description: 'ARN of the CloudFormation Status Check Lambda Function'
+    Value: !GetAtt CfnStatusCheckFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CfnStatusCheckFunctionArn'
+
+  StartAnalysisFunctionArn:
+    Description: 'ARN of the Start Analysis Lambda Function'
+    Value: !GetAtt StartAnalysisFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-StartAnalysisFunctionArn'
+
+  CheckStatusFunctionArn:
+    Description: 'ARN of the Check Status Lambda Function'
+    Value: !GetAtt CheckStatusFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CheckStatusFunctionArn'

@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Master CloudFormation template for Mainframe Modernization Platform'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  FoundationModel:
+    Type: String
+    Default: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+    Description: Foundation model for Bedrock agents
+
+  IdleSessionTTL:
+    Type: Number
+    Default: 600
+    Description: Idle session timeout in seconds for Bedrock agents
+
+  DeployServices:
+    Type: String
+    Default: 'both'
+    AllowedValues:
+      - 'both'
+      - 'cfn-generator'
+      - 'mainframe-analyzer'
+      - 'agents-only'
+    Description: Which components to deploy
+
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda code packages (leave empty to auto-create)
+    Default: ''
+
+Conditions:
+  DeployBoth: !Equals [!Ref DeployServices, 'both']
+  DeployCfnGenerator: !Or 
+    - !Equals [!Ref DeployServices, 'both']
+    - !Equals [!Ref DeployServices, 'cfn-generator']
+  DeployMainframeAnalyzer: !Or 
+    - !Equals [!Ref DeployServices, 'both']
+    - !Equals [!Ref DeployServices, 'mainframe-analyzer']
+  DeployAgentsOnly: !Equals [!Ref DeployServices, 'agents-only']
+  CreateLambdaBucket: !Equals [!Ref LambdaCodeBucket, '']
+
+Resources:
+  # Bedrock Agents Stack (Always deployed)
+  BedrockAgentsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./combined-mainframe-modernization-agents.yaml
+      Parameters:
+        Environment: !Ref Environment
+        FoundationModel: !Ref FoundationModel
+        IdleSessionTTL: !Ref IdleSessionTTL
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: BedrockAgents
+
+  # CFN Generator Service Stack
+  CfnGeneratorStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: DeployCfnGenerator
+    Properties:
+      TemplateURL: ./cfn-generator-service.yaml
+      Parameters:
+        Environment: !Ref Environment
+        LambdaCodeBucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
+        BedrockModelId: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: CfnGenerator
+
+  # Mainframe Analyzer Service Stack
+  MainframeAnalyzerStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: DeployMainframeAnalyzer
+    Properties:
+      TemplateURL: ./mainframe-analyzer-service.yaml
+      Parameters:
+        BedrockModelId: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+        Environment: !Ref Environment
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: MainframeAnalyzer
+
+Outputs:
+  # Bedrock Agents Outputs
+  SupervisorAgentId:
+    Description: 'ID of the Supervisor Bedrock Agent'
+    Value: !GetAtt BedrockAgentsStack.Outputs.SupervisorAgentId
+    Export:
+      Name: !Sub '${AWS::StackName}-SupervisorAgentId'
+
+  SupervisorAgentAliasId:
+    Description: 'ID of the Supervisor Agent Alias'
+    Value: !GetAtt BedrockAgentsStack.Outputs.SupervisorAgentAliasId
+    Export:
+      Name: !Sub '${AWS::StackName}-SupervisorAgentAliasId'
+
+  CfnGeneratorAgentId:
+    Description: 'ID of the CloudFormation Generator Bedrock Agent'
+    Value: !GetAtt BedrockAgentsStack.Outputs.CfnGeneratorAgentId
+    Export:
+      Name: !Sub '${AWS::StackName}-CfnGeneratorAgentId'
+
+  MainframeAnalyzerAgentId:
+    Description: 'ID of the Mainframe Analyzer Bedrock Agent'
+    Value: !GetAtt BedrockAgentsStack.Outputs.MainframeAnalyzerAgentId
+    Export:
+      Name: !Sub '${AWS::StackName}-MainframeAnalyzerAgentId'
+
+  # Service Stack Outputs (conditional)
+  CfnGeneratorStackId:
+    Condition: DeployCfnGenerator
+    Description: 'CloudFormation Stack ID for CFN Generator Service'
+    Value: !Ref CfnGeneratorStack
+    Export:
+      Name: !Sub '${AWS::StackName}-CfnGeneratorStackId'
+
+  MainframeAnalyzerStackId:
+    Condition: DeployMainframeAnalyzer
+    Description: 'CloudFormation Stack ID for Mainframe Analyzer Service'
+    Value: !Ref MainframeAnalyzerStack
+    Export:
+      Name: !Sub '${AWS::StackName}-MainframeAnalyzerStackId'
+
+  # Platform Information
+  PlatformEnvironment:
+    Description: 'Environment for this platform deployment'
+    Value: !Ref Environment
+    Export:
+      Name: !Sub '${AWS::StackName}-Environment'
+
+  PlatformRegion:
+    Description: 'AWS Region for this platform deployment'
+    Value: !Ref AWS::Region
+    Export:
+      Name: !Sub '${AWS::StackName}-Region'

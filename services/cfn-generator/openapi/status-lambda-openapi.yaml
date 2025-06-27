@@ -1,0 +1,101 @@
+openapi: 3.0.0
+info:
+  title: CloudFormation Generator API - Status
+  version: 1.0.0
+  description: API for checking the status of CloudFormation template generation jobs
+servers:
+  - url: https://lambda.{region}.amazonaws.com/2015-03-31/functions/arn:aws:lambda:{region}:{account-id}:function:CFNGenerator-Status-{environment}/invocations
+    description: Lambda function endpoint
+paths:
+  /status:
+    post:
+      summary: Check generation job status
+      description: Retrieves the current status of a CloudFormation template generation job
+      operationId: checkStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusRequest'
+      responses:
+        '200':
+          description: Status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          description: Invalid input parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    StatusRequest:
+      type: object
+      required:
+        - job_id
+      properties:
+        job_id:
+          type: string
+          description: Job ID returned from the generate endpoint
+          example: 12345678-abcd-1234-efgh-123456789012
+    StatusResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+          description: Unique identifier for the generation job
+          example: 12345678-abcd-1234-efgh-123456789012
+        status:
+          type: string
+          description: Current status of the generation job
+          enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+          example: COMPLETED
+        message:
+          type: string
+          description: Detailed message about the job status
+          example: CloudFormation template generation completed successfully
+        s3_location:
+          type: string
+          description: S3 location of the generated CloudFormation template
+          example: s3://cfn-generator-{environment}-{account-id}-{region}/IaC/cloudformation_template_1234567890.yaml
+        zip_location:
+          type: string
+          description: S3 location of the zipped CloudFormation template
+          example: s3://cfn-generator-{environment}-{account-id}-{region}/Archive/cfn_template_1234567890.zip
+        config_zip_location:
+          type: string
+          description: S3 location of the zipped configuration files
+          example: s3://cfn-generator-{environment}-{account-id}-{region}/Archive/config_files_1234567890.zip
+        start_time:
+          type: string
+          format: date-time
+          description: Time when the job was started
+          example: 2025-05-19T10:00:00Z
+        end_time:
+          type: string
+          format: date-time
+          description: Time when the job was completed
+          example: 2025-05-19T10:05:00Z
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Error message
+          example: Job not found
