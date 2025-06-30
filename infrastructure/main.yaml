@@ -37,14 +37,12 @@ Parameters:
     Default: ''
 
 Conditions:
-  DeployBoth: !Equals [!Ref DeployServices, 'both']
   DeployCfnGenerator: !Or 
     - !Equals [!Ref DeployServices, 'both']
     - !Equals [!Ref DeployServices, 'cfn-generator']
   DeployMainframeAnalyzer: !Or 
     - !Equals [!Ref DeployServices, 'both']
     - !Equals [!Ref DeployServices, 'mainframe-analyzer']
-  DeployAgentsOnly: !Equals [!Ref DeployServices, 'agents-only']
   CreateLambdaBucket: !Equals [!Ref LambdaCodeBucket, '']
 
 Resources:

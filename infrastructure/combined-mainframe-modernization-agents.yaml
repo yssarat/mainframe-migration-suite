@@ -490,12 +490,9 @@ Resources:
                 }
               }
       Tags:
-        - Key: Project
-          Value: MainframeModernization
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
+        Project: MainframeModernization
+        Environment: !Ref Environment
+        ManagedBy: CloudFormation
 
   # Lambda Permissions for CFN Generator Agent
   CfnGeneratorLambdaPermission:
@@ -1031,12 +1028,9 @@ Resources:
                 }
               }
       Tags:
-        - Key: Project
-          Value: MainframeModernization
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
+        Project: MainframeModernization
+        Environment: !Ref Environment
+        ManagedBy: CloudFormation
 
   # Lambda Permissions for Mainframe Analyzer Agent
   StartAnalysisLambdaPermission:
@@ -1247,8 +1241,9 @@ Resources:
 
         Your role as the Supervisor Agent is to ensure users get the most appropriate and effective assistance for their mainframe modernization needs. Always prioritize user experience and make the interaction with multiple specialized agents feel seamless and coordinated.
       AgentCollaborators:
-        - AgentId: !Ref CfnGeneratorAgent
-          AgentVersion: 'DRAFT'
+        - CollaboratorName: "CFN Generator Agent"
+          AgentDescriptor:
+            AliasArn: !GetAtt CfnGeneratorAgentAlias.AgentAliasArn
           CollaborationInstruction: |
             This agent specializes in generating CloudFormation templates from resource configurations stored in S3 buckets. 
             
@@ -1262,8 +1257,9 @@ Resources:
             - The user's S3 bucket and folder information if available
             - Any specific requirements for the CloudFormation templates
             - Whether this is a new generation request or status check
-        - AgentId: !Ref MainframeAnalyzerAgent
-          AgentVersion: 'DRAFT'
+        - CollaboratorName: "Mainframe Analyzer Agent"
+          AgentDescriptor:
+            AliasArn: !GetAtt MainframeAnalyzerAgentAlias.AgentAliasArn
           CollaborationInstruction: |
             This agent specializes in analyzing mainframe documentation and providing modernization recommendations.
             
@@ -1279,12 +1275,9 @@ Resources:
             - Their modernization goals or timeline if mentioned
             - Whether this is a new analysis request or status check
       Tags:
-        - Key: Project
-          Value: MainframeModernization
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
+        Project: MainframeModernization
+        Environment: !Ref Environment
+        ManagedBy: CloudFormation
 
   # Supervisor Agent Alias
   SupervisorAgentAlias:

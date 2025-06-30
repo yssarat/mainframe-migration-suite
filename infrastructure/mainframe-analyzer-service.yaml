@@ -2,6 +2,15 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Asynchronous Mainframe Documentation Analyzer'
 
 Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
   BedrockModelId:
     Type: String
     Default: anthropic.claude-3-7-sonnet-20250219-v1:0
@@ -47,7 +56,7 @@ Resources:
   PromptTemplate:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /mainframe-modernization/documentation-agent/updated-prompt
+      Name: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
       Type: String
       Tier: Advanced
       Value: |
@@ -188,7 +197,7 @@ Resources:
   JobsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: MainframeAnalyzerJobs
+      TableName: !Sub MainframeAnalyzerJobs-${Environment}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: job_id
@@ -270,7 +279,7 @@ Resources:
   InitialLambda:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: MainframeAnalyzer-Initial
+      FunctionName: !Sub MainframeAnalyzer-Initial-${Environment}
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:

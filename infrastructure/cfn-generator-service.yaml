@@ -26,7 +26,7 @@ Parameters:
     
   BedrockModelId:
     Type: String
-    Default: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0'
+    Default: 'anthropic.claude-3-7-sonnet-20250219-v1:0'
     Description: Bedrock model ID to use for template generation
     
   ArchiveRetentionDays:
@@ -106,7 +106,6 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:ListBucket
-                  - s3:HeadBucket
                 Resource:
                   - "*"
               - Effect: Allow
@@ -133,9 +132,9 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                 Resource: 
-                  - !Sub "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
-                  - !Sub "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
-                  - !Sub "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
+                  - "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
+                  - "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
+                  - "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
               - Effect: Allow
                 Action:
