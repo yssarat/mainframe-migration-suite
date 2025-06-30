@@ -102,7 +102,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub 'cfn-generator-agent-CfnGenerator-${Environment}'
-      Runtime: python3.9
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt CfnLambdaExecutionRole.Arn
       Timeout: 300
@@ -169,7 +169,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub 'cfn-generator-agent-StatusCheck-${Environment}'
-      Runtime: python3.9
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt CfnLambdaExecutionRole.Arn
       Timeout: 60
@@ -596,7 +596,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub 'MainframeAnalyzerAgent-Async-StartAnalysis-${Environment}'
-      Runtime: python3.9
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt MainframeLambdaExecutionRole.Arn
       Timeout: 300
@@ -663,7 +663,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub 'MainframeAnalyzerAgent-Async-CheckStatus-${Environment}'
-      Runtime: python3.9
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt MainframeLambdaExecutionRole.Arn
       Timeout: 60

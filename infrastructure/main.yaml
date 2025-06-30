@@ -93,6 +93,10 @@ Resources:
       Parameters:
         BedrockModelId: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
         Environment: !Ref Environment
+        LambdaCodeBucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
       Tags:
         - Key: Project
           Value: MainframeModernization

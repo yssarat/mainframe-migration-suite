@@ -40,6 +40,11 @@ Parameters:
     Type: String
     Default: /mainframe-modernization/documentation-agent/updated-prompt
     Description: Parameter Store parameter for LLM prompt
+
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda code packages
+    Default: ''
   
   LambdaTimeout:
     Type: Number
@@ -50,6 +55,9 @@ Parameters:
     Type: Number
     Default: 2048
     Description: Memory allocation for Lambda functions in MB
+
+Conditions:
+  CreateLambdaBucket: !Equals [!Ref LambdaCodeBucket, '']
 
 Resources:
   # Parameter Store for Prompt Template
@@ -283,7 +291,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/initial-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -300,10 +311,15 @@ Resources:
       LayerName: pypdfdocx-layer
       Description: Layer containing PyPDF and DocX packages
       Content:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: layer/pypdfdocxlayer.zip
       CompatibleRuntimes:
-        - python3.9
+        - python3.13
+        - python3.12
+        - python3.11
 
   ProcessFileLambda:
     Type: AWS::Lambda::Function
@@ -312,9 +328,12 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/process-file-lambda.zip
-      Runtime: python3.9
+      Runtime: python3.13
       Timeout: !Ref LambdaTimeout
       MemorySize: !Ref LambdaMemory
       Layers:
@@ -330,7 +349,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/aggregate-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -348,7 +370,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/chunking-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -366,7 +391,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/chunk-processor-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -384,7 +412,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/result-aggregator-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -401,7 +432,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/analysis-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -418,7 +452,10 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Sub 'mainframe-transform-dev-${AWS::AccountId}'
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'mainframe-analyzer-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/status-lambda.zip
       Runtime: python3.13
       Timeout: 30
@@ -431,7 +468,7 @@ Resources:
   MainframeAnalyzerStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      StateMachineName: MainframeAnalyzerWorkflow
+      StateMachineName: !Sub MainframeAnalyzerWorkflow-${Environment}
       RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
       DefinitionString: !Sub |
         {
