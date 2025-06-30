@@ -133,6 +133,8 @@ dmypy.json
 *.zip
 packaged-template.yaml
 packaged-template.yml
+main-packaged.yaml
+*-packaged.yaml
 
 # IDE
 .vscode/

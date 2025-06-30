@@ -34,10 +34,14 @@ Parameters:
     Default: 30
     Description: Number of days to retain archives
 
+Conditions:
+  CreateLambdaBucket: !Equals [!Ref LambdaCodeBucket, '']
+
 Resources:
   # S3 Bucket for storing templates and configurations
   CFNGeneratorBucket:
     Type: AWS::S3::Bucket
+    Condition: CreateLambdaBucket
     Properties:
       BucketName: !Sub cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}
       VersioningConfiguration:
@@ -186,7 +190,10 @@ Resources:
       Handler: initial-lambda/lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/initial-lambda.zip
       Runtime: python3.13
       Timeout: 30
@@ -217,7 +224,10 @@ Resources:
       Handler: status-lambda/lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/status-lambda.zip
       Runtime: python3.13
       Timeout: 30
@@ -247,7 +257,10 @@ Resources:
       Handler: generator/lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/generator-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -272,7 +285,10 @@ Resources:
       Handler: completion/lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/completion-lambda.zip
       Runtime: python3.13
       Timeout: 30
@@ -293,7 +309,10 @@ Resources:
       Handler: validation-lambda/lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
+        S3Bucket: !If 
+          - CreateLambdaBucket
+          - !Sub 'cfn-generator-${Environment}-${AWS::AccountId}-${AWS::Region}'
+          - !Ref LambdaCodeBucket
         S3Key: lambda/validation-lambda.zip
       Runtime: python3.13
       Timeout: !Ref LambdaTimeout
@@ -485,6 +504,7 @@ Resources:
 
 Outputs:
   CFNGeneratorBucketName:
+    Condition: CreateLambdaBucket
     Description: S3 bucket for storing templates and configurations
     Value: !Ref CFNGeneratorBucket
     
