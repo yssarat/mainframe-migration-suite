@@ -10,9 +10,10 @@ Parameters:
   
   FoundationModel:
     Type: String
-    Default: 'us.anthropic.claude-3-5-haiku-20241022-v1:0'
+    Default: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0'
     Description: Foundation model inference profile for all agents (cost-optimized)
     AllowedValues:
+      - 'us.anthropic.claude-3-7-sonnet-20250219-v1:0'
       - 'us.anthropic.claude-3-5-haiku-20241022-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
       - 'anthropic.claude-3-haiku-20240307-v1:0'
@@ -518,8 +519,7 @@ Resources:
       AgentId: !Ref CfnGeneratorAgent
       AgentAliasName: !Sub 'cfn-generator-${Environment}'
       Description: !Sub 'CloudFormation Generator agent alias for ${Environment} environment'
-      RoutingConfiguration:
-        - AgentVersion: 'DRAFT'
+    DependsOn: CfnGeneratorAgent
 
   # =============================================================================
   # MAINFRAME ANALYZER AGENT RESOURCES
@@ -1056,8 +1056,7 @@ Resources:
       AgentId: !Ref MainframeAnalyzerAgent
       AgentAliasName: !Sub 'mainframe-analyzer-${Environment}'
       Description: !Sub 'Mainframe Analyzer agent alias for ${Environment} environment'
-      RoutingConfiguration:
-        - AgentVersion: 'DRAFT'
+    DependsOn: MainframeAnalyzerAgent
 
   # =============================================================================
   # SUPERVISOR AGENT RESOURCES
@@ -1241,7 +1240,7 @@ Resources:
 
         Your role as the Supervisor Agent is to ensure users get the most appropriate and effective assistance for their mainframe modernization needs. Always prioritize user experience and make the interaction with multiple specialized agents feel seamless and coordinated.
       AgentCollaborators:
-        - CollaboratorName: "CFN Generator Agent"
+        - CollaboratorName: "CFN-Generator-Agent"
           AgentDescriptor:
             AliasArn: !GetAtt CfnGeneratorAgentAlias.AgentAliasArn
           CollaborationInstruction: |
@@ -1257,7 +1256,7 @@ Resources:
             - The user's S3 bucket and folder information if available
             - Any specific requirements for the CloudFormation templates
             - Whether this is a new generation request or status check
-        - CollaboratorName: "Mainframe Analyzer Agent"
+        - CollaboratorName: "Mainframe-Analyzer-Agent"
           AgentDescriptor:
             AliasArn: !GetAtt MainframeAnalyzerAgentAlias.AgentAliasArn
           CollaborationInstruction: |
@@ -1286,8 +1285,7 @@ Resources:
       AgentId: !Ref SupervisorAgent
       AgentAliasName: !Sub 'supervisor-${Environment}'
       Description: !Sub 'Supervisor agent alias for ${Environment} environment'
-      RoutingConfiguration:
-        - AgentVersion: 'DRAFT'
+    DependsOn: SupervisorAgent
 
 # =============================================================================
 # OUTPUTS

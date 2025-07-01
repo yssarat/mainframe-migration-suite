@@ -347,7 +347,7 @@ def call_llm_converse(prompt, wait=False):
     try:
         # Create Bedrock client
         client = create_bedrock_client()
-        model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
+        model_id = os.environ.get('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
         logger.info(f"Using Bedrock model: {model_id}")
         
         # Prepare the request body

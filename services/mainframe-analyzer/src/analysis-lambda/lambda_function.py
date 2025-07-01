@@ -102,7 +102,7 @@ def call_llm_converse(prompt: str, wait: bool = True, timeout_seconds: int = 300
         client = create_bedrock_client()
         
         # Get model ID from environment or use default
-        model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-5-haiku-20241022-v1:0')
+        model_id = os.environ.get('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
         print(f"[BEDROCK] Using model: {model_id}")
         
         # Prepare the conversation

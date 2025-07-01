@@ -12,6 +12,7 @@ REGION=$(aws configure get region)
 PLATFORM_STACK_NAME="mainframe-modernization-platform"
 PROFILE=""
 CLEAN_BUCKETS="true"
+CLEAN_AGENTS="true"
 
 # Colors for output
 RED='\033[0;31m'
@@ -47,12 +48,14 @@ usage() {
     echo "  --stack-name STACK_NAME   Platform stack name [default: mainframe-modernization-platform]"
     echo "  --profile PROFILE         AWS profile to use"
     echo "  --no-clean-buckets        Skip cleaning existing S3 buckets (may cause conflicts)"
+    echo "  --no-clean-agents         Skip cleaning existing Bedrock agent aliases (may cause conflicts)"
     echo "  --help                    Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --env dev --region us-east-1"
     echo "  $0 --env prod --region us-west-2 --profile production"
     echo "  $0 --env dev --no-clean-buckets  # Keep existing buckets"
+    echo "  $0 --env dev --no-clean-agents   # Keep existing agent aliases"
 }
 
 # Parse command line arguments
@@ -78,6 +81,10 @@ while [[ $# -gt 0 ]]; do
             CLEAN_BUCKETS="false"
             shift
             ;;
+        --no-clean-agents)
+            CLEAN_AGENTS="false"
+            shift
+            ;;
         --help)
             usage
             exit 0
@@ -93,6 +100,12 @@ done
 # Validate required parameters
 if [[ -z "$REGION" ]]; then
     print_error "Region is required. Set it via --region or configure AWS CLI."
+    exit 1
+fi
+
+# Check for required tools
+if [[ "$CLEAN_AGENTS" == "true" ]] && ! command -v jq &> /dev/null; then
+    print_error "jq is required for agent cleanup but not installed. Install jq or use --no-clean-agents"
     exit 1
 fi
 
@@ -138,11 +151,58 @@ delete_s3_bucket() {
     fi
 }
 
-# Step 0: Clean up and create required S3 buckets
-if [[ "$CLEAN_BUCKETS" == "true" ]]; then
-    print_status "Step 0: Cleaning up existing S3 buckets and creating fresh ones..."
+# Step 0a: Clean up existing Bedrock agent aliases to prevent conflicts
+if [[ "$CLEAN_AGENTS" == "true" ]]; then
+    print_status "Step 0a: Cleaning up existing Bedrock agent aliases..."
+    
+    # Function to safely delete agent alias
+    delete_agent_alias() {
+        local agent_id="$1"
+        local agent_alias_id="$2"
+        local agent_name="$3"
+        
+        if aws bedrock-agent get-agent-alias --agent-id "$agent_id" --agent-alias-id "$agent_alias_id" --region "$REGION" >/dev/null 2>&1; then
+            print_status "Deleting existing agent alias for $agent_name (Agent ID: $agent_id, Alias ID: $agent_alias_id)"
+            aws bedrock-agent delete-agent-alias --agent-id "$agent_id" --agent-alias-id "$agent_alias_id" --region "$REGION" >/dev/null 2>&1 || {
+                print_warning "Failed to delete agent alias for $agent_name, continuing..."
+            }
+            print_success "Deleted agent alias for $agent_name"
+        else
+            print_status "No existing agent alias found for $agent_name"
+        fi
+    }
+    
+    # Get list of existing agents and clean up their aliases
+    print_status "Scanning for existing Bedrock agents..."
+    EXISTING_AGENTS=$(aws bedrock-agent list-agents --region "$REGION" --query "agentSummaries[?contains(agentName, 'cfn-generator') || contains(agentName, 'MainframeAnalyzer') || contains(agentName, 'mainframe-analyzer')].{agentId:agentId,agentName:agentName}" --output json 2>/dev/null || echo "[]")
+    
+    if [[ "$EXISTING_AGENTS" != "[]" ]]; then
+        echo "$EXISTING_AGENTS" | jq -r '.[] | "\(.agentId) \(.agentName)"' | while read -r agent_id agent_name; do
+            print_status "Checking agent: $agent_name ($agent_id)"
+            
+            # Get aliases for this agent
+            ALIASES=$(aws bedrock-agent list-agent-aliases --agent-id "$agent_id" --region "$REGION" --query "agentAliasSummaries[].agentAliasId" --output text 2>/dev/null || echo "")
+            
+            if [[ -n "$ALIASES" ]]; then
+                for alias_id in $ALIASES; do
+                    delete_agent_alias "$agent_id" "$alias_id" "$agent_name"
+                done
+            fi
+        done
+    else
+        print_status "No existing agents found that match our naming patterns"
+    fi
+    
+    print_success "Agent alias cleanup completed"
 else
-    print_status "Step 0: Creating required S3 buckets (skipping cleanup)..."
+    print_status "Step 0a: Skipping Bedrock agent alias cleanup (--no-clean-agents specified)"
+fi
+
+# Step 0b: Clean up and create required S3 buckets
+if [[ "$CLEAN_BUCKETS" == "true" ]]; then
+    print_status "Step 0b: Cleaning up existing S3 buckets and creating fresh ones..."
+else
+    print_status "Step 0b: Creating required S3 buckets (skipping cleanup)..."
 fi
 
 # Define bucket names
@@ -381,7 +441,7 @@ aws cloudformation deploy \
     --stack-name "$STACK_NAME" \
     --parameter-overrides \
         Environment="$ENVIRONMENT" \
-        FoundationModel="us.anthropic.claude-3-5-haiku-20241022-v1:0" \
+        FoundationModel="us.anthropic.claude-3-7-sonnet-20250219-v1:0" \
         IdleSessionTTL=600 \
         DeployServices="both" \
         LambdaCodeBucket="" \

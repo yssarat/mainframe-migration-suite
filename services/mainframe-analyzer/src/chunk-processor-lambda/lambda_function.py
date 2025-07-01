@@ -146,7 +146,7 @@ def call_llm_converse(prompt: str, wait: bool = False, timeout_seconds: int = No
     
     try:
         client = create_bedrock_client()
-        model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
+        model_id = os.environ.get('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
         
         # For Claude models, use the correct format with system as a top-level parameter
         request_body = {

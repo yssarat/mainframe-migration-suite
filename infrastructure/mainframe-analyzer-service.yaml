@@ -13,8 +13,8 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: anthropic.claude-3-7-sonnet-20250219-v1:0
-    Description: Bedrock model ID to use for analysis
+    Default: 'arn:aws:bedrock:us-east-1:663362705389:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0'
+    Description: Bedrock model ARN to use for analysis
   
   MaxFilesPerJob:
     Type: Number
