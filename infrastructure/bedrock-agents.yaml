@@ -451,7 +451,7 @@ Resources:
 
         1. **Collect Required Information**:
            - S3 bucket name (required)
-           - S3 folder path (required)
+           - Folder path (required)
 
         2. **Validate Input**:
            - Ensure the bucket name follows S3 naming conventions
@@ -565,7 +565,7 @@ Resources:
 
         1. **StartAnalysis Action Group**:
            - Purpose: Start mainframe documentation analysis
-           - Required parameters: bucket_name, s3_folder
+           - Required parameters: bucket_name, folder_path
            - Returns: job_id, status, message
 
         2. **CheckStatus Action Group**:
@@ -629,12 +629,12 @@ Resources:
                                   "type": "string",
                                   "description": "Name of the S3 bucket containing mainframe documentation"
                                 },
-                                "s3_folder": {
+                                "folder_path": {
                                   "type": "string",
                                   "description": "Folder path within the S3 bucket"
                                 }
                               },
-                              "required": ["bucket_name", "s3_folder"]
+                              "required": ["bucket_name", "folder_path"]
                             }
                           }
                         }
