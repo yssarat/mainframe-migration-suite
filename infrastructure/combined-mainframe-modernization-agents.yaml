@@ -55,9 +55,8 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                 Resource: 
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
                   - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -258,7 +257,7 @@ Resources:
     Properties:
       AgentName: !Sub 'cfn-generator-agent-${Environment}'
       Description: 'This agent creates cloudformation templates based on user inputs'
-      FoundationModel: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      FoundationModel: !Ref FoundationModel
       AgentResourceRoleArn: !GetAtt CfnGeneratorAgentRole.Arn
       IdleSessionTTLInSeconds: !Ref IdleSessionTTL
       Instruction: |
@@ -502,7 +501,7 @@ Resources:
       FunctionName: !Ref CfnGeneratorFunction
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
-      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+      SourceArn: !GetAtt CfnGeneratorAgent.AgentArn
 
   CfnStatusCheckLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -510,7 +509,7 @@ Resources:
       FunctionName: !Ref CfnStatusCheckFunction
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
-      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+      SourceArn: !GetAtt CfnGeneratorAgent.AgentArn
 
   # CFN Generator Agent Alias
   CfnGeneratorAgentAlias:
@@ -752,7 +751,7 @@ Resources:
     Properties:
       AgentName: !Sub 'MainframeAnalyzerAgent-Async-${Environment}'
       Description: 'This agent analyzes mainframe documentation and provides modernization recommendations'
-      FoundationModel: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      FoundationModel: !Ref FoundationModel
       AgentResourceRoleArn: !GetAtt MainframeAnalyzerAgentRole.Arn
       IdleSessionTTLInSeconds: !Ref IdleSessionTTL
       Instruction: |
@@ -1039,7 +1038,7 @@ Resources:
       FunctionName: !Ref StartAnalysisFunction
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
-      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+      SourceArn: !GetAtt MainframeAnalyzerAgent.AgentArn
 
   CheckStatusLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -1047,7 +1046,7 @@ Resources:
       FunctionName: !Ref CheckStatusFunction
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
-      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+      SourceArn: !GetAtt MainframeAnalyzerAgent.AgentArn
 
   # Mainframe Analyzer Agent Alias
   MainframeAnalyzerAgentAlias:
@@ -1116,7 +1115,7 @@ Resources:
     Properties:
       AgentName: !Sub 'SupervisorAgent-${Environment}'
       Description: 'Supervisor agent that coordinates between CloudFormation Generator and Mainframe Analyzer agents'
-      FoundationModel: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
+      FoundationModel: !Ref FoundationModel
       AgentResourceRoleArn: !GetAtt SupervisorAgentRole.Arn
       IdleSessionTTLInSeconds: !Ref IdleSessionTTL
       AgentCollaboration: SUPERVISOR_ROUTER
