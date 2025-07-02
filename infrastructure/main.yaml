@@ -43,26 +43,10 @@ Conditions:
   DeployMainframeAnalyzer: !Or 
     - !Equals [!Ref DeployServices, 'both']
     - !Equals [!Ref DeployServices, 'mainframe-analyzer']
+  DeployAgents: !Not [!Equals [!Ref DeployServices, 'agents-only']]
   CreateLambdaBucket: !Equals [!Ref LambdaCodeBucket, '']
 
 Resources:
-  # Bedrock Agents Stack (Always deployed)
-  BedrockAgentsStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: ./combined-mainframe-modernization-agents.yaml
-      Parameters:
-        Environment: !Ref Environment
-        FoundationModel: !Ref FoundationModel
-        IdleSessionTTL: !Ref IdleSessionTTL
-      Tags:
-        - Key: Project
-          Value: MainframeModernization
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Component
-          Value: BedrockAgents
-
   # CFN Generator Service Stack
   CfnGeneratorStack:
     Type: AWS::CloudFormation::Stack
@@ -105,27 +89,57 @@ Resources:
         - Key: Component
           Value: MainframeAnalyzer
 
+  # Bedrock Agents Stack (Deploy after service stacks)
+  BedrockAgentsStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: DeployAgents
+    DependsOn:  # ADDED: Ensure service stacks deploy first
+      - MainframeAnalyzerStack
+      - CfnGeneratorStack
+    Properties:
+      TemplateURL: ./bedrock-agents.yaml
+      Parameters:
+        Environment: !Ref Environment
+        FoundationModel: !Ref FoundationModel
+        IdleSessionTTL: !Ref IdleSessionTTL
+        # ADDED: Pass Lambda ARNs from service stacks
+        MainframeAnalyzerInitialLambdaArn: !GetAtt MainframeAnalyzerStack.Outputs.InitialLambdaArn
+        MainframeAnalyzerStatusLambdaArn: !GetAtt MainframeAnalyzerStack.Outputs.StatusLambdaArn
+        CfnGeneratorInitialLambdaArn: !GetAtt CfnGeneratorStack.Outputs.InitialLambdaArn
+        CfnGeneratorStatusLambdaArn: !GetAtt CfnGeneratorStack.Outputs.StatusLambdaArn
+      Tags:
+        - Key: Project
+          Value: MainframeModernization
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: BedrockAgents
+
 Outputs:
   # Bedrock Agents Outputs
   SupervisorAgentId:
+    Condition: DeployAgents
     Description: 'ID of the Supervisor Bedrock Agent'
     Value: !GetAtt BedrockAgentsStack.Outputs.SupervisorAgentId
     Export:
       Name: !Sub '${AWS::StackName}-SupervisorAgentId'
 
   SupervisorAgentAliasId:
+    Condition: DeployAgents
     Description: 'ID of the Supervisor Agent Alias'
     Value: !GetAtt BedrockAgentsStack.Outputs.SupervisorAgentAliasId
     Export:
       Name: !Sub '${AWS::StackName}-SupervisorAgentAliasId'
 
   CfnGeneratorAgentId:
+    Condition: DeployAgents
     Description: 'ID of the CloudFormation Generator Bedrock Agent'
     Value: !GetAtt BedrockAgentsStack.Outputs.CfnGeneratorAgentId
     Export:
       Name: !Sub '${AWS::StackName}-CfnGeneratorAgentId'
 
   MainframeAnalyzerAgentId:
+    Condition: DeployAgents
     Description: 'ID of the Mainframe Analyzer Bedrock Agent'
     Value: !GetAtt BedrockAgentsStack.Outputs.MainframeAnalyzerAgentId
     Export:

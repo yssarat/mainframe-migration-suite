@@ -180,3 +180,4 @@ services/*/deployment-packages/
 services/*/lambda-packages/
 services/*/.aws/
 services/*/tmp/
+infrastructure/main-packaged.yaml

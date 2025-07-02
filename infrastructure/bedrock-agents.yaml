@@ -26,6 +26,23 @@ Parameters:
     MinValue: 60
     MaxValue: 3600
 
+  # Lambda Function ARNs from Service Stacks
+  MainframeAnalyzerInitialLambdaArn:
+    Type: String
+    Description: ARN of the MainframeAnalyzer-Initial-dev Lambda function from the service stack
+  
+  MainframeAnalyzerStatusLambdaArn:
+    Type: String
+    Description: ARN of the MainframeAnalyzer-Status Lambda function from the service stack
+  
+  CfnGeneratorInitialLambdaArn:
+    Type: String
+    Description: ARN of the CFNGenerator-Initial-dev Lambda function from the service stack
+  
+  CfnGeneratorStatusLambdaArn:
+    Type: String
+    Description: ARN of the CFNGenerator-Status-dev Lambda function from the service stack
+
 Resources:
   # =============================================================================
   # CLOUDFORMATION GENERATOR AGENT RESOURCES
@@ -67,183 +84,8 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: 
-                  - !GetAtt CfnGeneratorFunction.Arn
-                  - !GetAtt CfnStatusCheckFunction.Arn
-
-  # Lambda Execution Role for CFN Generator
-  CfnLambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: S3AccessPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource: 
-                  - 'arn:aws:s3:::*'
-                  - 'arn:aws:s3:::*/*'
-
-  # Lambda Function for CloudFormation Generation
-  CfnGeneratorFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub 'cfn-generator-agent-CfnGenerator-${Environment}'
-      Runtime: python3.13
-      Handler: index.lambda_handler
-      Role: !GetAtt CfnLambdaExecutionRole.Arn
-      Timeout: 300
-      Code:
-        ZipFile: |
-          import json
-          import uuid
-          import boto3
-          from datetime import datetime
-          
-          def lambda_handler(event, context):
-              """
-              Generate CloudFormation templates from S3 resource configurations
-              Expected parameters: bucket_name, s3_folder
-              """
-              try:
-                  # Parse input parameters
-                  parameters = event.get('parameters', [])
-                  bucket_name = None
-                  s3_folder = None
-                  
-                  for param in parameters:
-                      if param['name'] == 'bucket_name':
-                          bucket_name = param['value']
-                      elif param['name'] == 's3_folder':
-                          s3_folder = param['value']
-                  
-                  if not bucket_name or not s3_folder:
-                      return {
-                          'statusCode': 400,
-                          'body': json.dumps({
-                              'error': 'Missing required parameters: bucket_name and s3_folder'
-                          })
-                      }
-                  
-                  # Generate job ID
-                  job_id = str(uuid.uuid4())
-                  
-                  # For demo purposes, return success
-                  response = {
-                      'job_id': job_id,
-                      'status': 'STARTED',
-                      'message': f'CloudFormation template generation started for s3://{bucket_name}/{s3_folder}',
-                      'bucket_name': bucket_name,
-                      's3_folder': s3_folder,
-                      'start_time': datetime.utcnow().isoformat()
-                  }
-                  
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps(response)
-                  }
-                  
-              except Exception as e:
-                  return {
-                      'statusCode': 500,
-                      'body': json.dumps({
-                          'error': str(e)
-                      })
-                  }
-
-  # Lambda Function for CFN Status Check
-  CfnStatusCheckFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub 'cfn-generator-agent-StatusCheck-${Environment}'
-      Runtime: python3.13
-      Handler: index.lambda_handler
-      Role: !GetAtt CfnLambdaExecutionRole.Arn
-      Timeout: 60
-      Code:
-        ZipFile: |
-          import json
-          import random
-          from datetime import datetime, timedelta
-          
-          def lambda_handler(event, context):
-              """
-              Check status of CloudFormation template generation
-              Expected parameters: job_id
-              """
-              try:
-                  # Parse input parameters
-                  parameters = event.get('parameters', [])
-                  job_id = None
-                  
-                  for param in parameters:
-                      if param['name'] == 'job_id':
-                          job_id = param['value']
-                  
-                  if not job_id:
-                      return {
-                          'statusCode': 400,
-                          'body': json.dumps({
-                              'error': 'Missing required parameter: job_id'
-                          })
-                      }
-                  
-                  # For demo purposes, simulate different statuses
-                  statuses = ['PROCESSING', 'COMPLETED', 'FAILED']
-                  status = random.choice(statuses)
-                  
-                  if status == 'COMPLETED':
-                      response = {
-                          'job_id': job_id,
-                          'status': status,
-                          'message': 'CloudFormation template generation completed successfully',
-                          's3_location': f's3://cfn-generator-dev-{context.aws_request_id[:8]}-us-east-1/IaC/cloudformation_template_{job_id[:8]}.yaml',
-                          'zip_location': f's3://cfn-generator-dev-{context.aws_request_id[:8]}-us-east-1/Archive/cfn_template_{job_id[:8]}.zip',
-                          'config_zip_location': f's3://cfn-generator-dev-{context.aws_request_id[:8]}-us-east-1/Archive/config_files_{job_id[:8]}.zip',
-                          'end_time': datetime.utcnow().isoformat()
-                      }
-                  elif status == 'PROCESSING':
-                      response = {
-                          'job_id': job_id,
-                          'status': status,
-                          'message': 'CloudFormation template generation in progress',
-                          'progress': '60%',
-                          'current_stage': 'GENERATING_TEMPLATES'
-                      }
-                  else:  # FAILED
-                      response = {
-                          'job_id': job_id,
-                          'status': status,
-                          'message': 'CloudFormation template generation failed',
-                          'error': 'Unable to access S3 bucket or invalid resource configurations',
-                          'end_time': datetime.utcnow().isoformat()
-                      }
-                  
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps(response)
-                  }
-                  
-              except Exception as e:
-                  return {
-                      'statusCode': 500,
-                      'body': json.dumps({
-                          'error': str(e)
-                      })
-                  }
+                  - !Ref CfnGeneratorInitialLambdaArn
+                  - !Ref CfnGeneratorStatusLambdaArn
 
   # CloudWatch Log Group for CFN Generator Agent
   CfnGeneratorAgentLogGroup:
@@ -251,6 +93,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/bedrock/agents/cfn-generator-agent-${Environment}'
       RetentionInDays: 30
+
   # CloudFormation Generator Bedrock Agent
   CfnGeneratorAgent:
     Type: AWS::Bedrock::Agent
@@ -398,7 +241,7 @@ Resources:
         - ActionGroupName: 'CfnGeneratorActions'
           Description: 'Generate CloudFormation templates from S3 resource configurations'
           ActionGroupExecutor:
-            Lambda: !GetAtt CfnGeneratorFunction.Arn
+            Lambda: !Ref CfnGeneratorInitialLambdaArn
           ApiSchema:
             Payload: |
               {
@@ -447,7 +290,7 @@ Resources:
         - ActionGroupName: 'StatusCheckAction'
           Description: 'Check status of CloudFormation template generation jobs'
           ActionGroupExecutor:
-            Lambda: !GetAtt CfnStatusCheckFunction.Arn
+            Lambda: !Ref CfnGeneratorStatusLambdaArn
           ApiSchema:
             Payload: |
               {
@@ -498,7 +341,7 @@ Resources:
   CfnGeneratorLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref CfnGeneratorFunction
+      FunctionName: !Ref CfnGeneratorInitialLambdaArn
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !GetAtt CfnGeneratorAgent.AgentArn
@@ -506,7 +349,7 @@ Resources:
   CfnStatusCheckLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref CfnStatusCheckFunction
+      FunctionName: !Ref CfnGeneratorStatusLambdaArn
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !GetAtt CfnGeneratorAgent.AgentArn
@@ -560,184 +403,8 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: 
-                  - !GetAtt StartAnalysisFunction.Arn
-                  - !GetAtt CheckStatusFunction.Arn
-
-  # Lambda Execution Role for Mainframe Analyzer
-  MainframeLambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: S3AccessPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource: 
-                  - 'arn:aws:s3:::*'
-                  - 'arn:aws:s3:::*/*'
-
-  # Lambda Function for StartAnalysis Action
-  StartAnalysisFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub 'MainframeAnalyzerAgent-Async-StartAnalysis-${Environment}'
-      Runtime: python3.13
-      Handler: index.lambda_handler
-      Role: !GetAtt MainframeLambdaExecutionRole.Arn
-      Timeout: 300
-      Code:
-        ZipFile: |
-          import json
-          import uuid
-          import boto3
-          from datetime import datetime
-          
-          def lambda_handler(event, context):
-              """
-              Start analysis of mainframe documentation in S3
-              Expected parameters: bucket_name, s3_folder
-              """
-              try:
-                  # Parse input parameters
-                  parameters = event.get('parameters', [])
-                  bucket_name = None
-                  s3_folder = None
-                  
-                  for param in parameters:
-                      if param['name'] == 'bucket_name':
-                          bucket_name = param['value']
-                      elif param['name'] == 's3_folder':
-                          s3_folder = param['value']
-                  
-                  if not bucket_name or not s3_folder:
-                      return {
-                          'statusCode': 400,
-                          'body': json.dumps({
-                              'error': 'Missing required parameters: bucket_name and s3_folder'
-                          })
-                      }
-                  
-                  # Generate job ID
-                  job_id = str(uuid.uuid4())
-                  
-                  # For demo purposes, return success
-                  response = {
-                      'job_id': job_id,
-                      'status': 'STARTED',
-                      'message': f'Analysis started for s3://{bucket_name}/{s3_folder}',
-                      'bucket_name': bucket_name,
-                      's3_folder': s3_folder,
-                      'start_time': datetime.utcnow().isoformat()
-                  }
-                  
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps(response)
-                  }
-                  
-              except Exception as e:
-                  return {
-                      'statusCode': 500,
-                      'body': json.dumps({
-                          'error': str(e)
-                      })
-                  }
-
-  # Lambda Function for CheckStatus Action
-  CheckStatusFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub 'MainframeAnalyzerAgent-Async-CheckStatus-${Environment}'
-      Runtime: python3.13
-      Handler: index.lambda_handler
-      Role: !GetAtt MainframeLambdaExecutionRole.Arn
-      Timeout: 60
-      Code:
-        ZipFile: |
-          import json
-          import random
-          from datetime import datetime, timedelta
-          
-          def lambda_handler(event, context):
-              """
-              Check status of mainframe documentation analysis
-              Expected parameters: job_id
-              """
-              try:
-                  # Parse input parameters
-                  parameters = event.get('parameters', [])
-                  job_id = None
-                  
-                  for param in parameters:
-                      if param['name'] == 'job_id':
-                          job_id = param['value']
-                  
-                  if not job_id:
-                      return {
-                          'statusCode': 400,
-                          'body': json.dumps({
-                              'error': 'Missing required parameter: job_id'
-                          })
-                      }
-                  
-                  # For demo purposes, simulate different statuses
-                  statuses = ['PROCESSING', 'COMPLETED', 'FAILED']
-                  status = random.choice(statuses)
-                  
-                  if status == 'COMPLETED':
-                      response = {
-                          'job_id': job_id,
-                          'status': status,
-                          'message': 'Analysis completed successfully',
-                          'results_location': f's3://mainframe-analysis-results/{job_id}/',
-                          'files_processed': 15,
-                          'recommendations_generated': 8,
-                          'end_time': datetime.utcnow().isoformat()
-                      }
-                  elif status == 'PROCESSING':
-                      response = {
-                          'job_id': job_id,
-                          'status': status,
-                          'message': 'Analysis in progress',
-                          'files_processed': 8,
-                          'total_files': 15,
-                          'current_stage': 'ANALYZING'
-                      }
-                  else:  # FAILED
-                      response = {
-                          'job_id': job_id,
-                          'status': status,
-                          'message': 'Analysis failed',
-                          'error': 'Unable to access S3 bucket or invalid file format',
-                          'end_time': datetime.utcnow().isoformat()
-                      }
-                  
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps(response)
-                  }
-                  
-              except Exception as e:
-                  return {
-                      'statusCode': 500,
-                      'body': json.dumps({
-                          'error': str(e)
-                      })
-                  }
+                  - !Ref MainframeAnalyzerInitialLambdaArn
+                  - !Ref MainframeAnalyzerStatusLambdaArn
 
   # CloudWatch Log Group for Mainframe Analyzer Agent
   MainframeAnalyzerAgentLogGroup:
@@ -935,7 +602,7 @@ Resources:
         - ActionGroupName: 'StartAnalysis'
           Description: 'Start analysis of mainframe documentation in S3'
           ActionGroupExecutor:
-            Lambda: !GetAtt StartAnalysisFunction.Arn
+            Lambda: !Ref MainframeAnalyzerInitialLambdaArn
           ApiSchema:
             Payload: |
               {
@@ -984,7 +651,7 @@ Resources:
         - ActionGroupName: 'CheckStatus'
           Description: 'Check status of mainframe documentation analysis jobs'
           ActionGroupExecutor:
-            Lambda: !GetAtt CheckStatusFunction.Arn
+            Lambda: !Ref MainframeAnalyzerStatusLambdaArn
           ApiSchema:
             Payload: |
               {
@@ -1035,7 +702,7 @@ Resources:
   StartAnalysisLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref StartAnalysisFunction
+      FunctionName: !Ref MainframeAnalyzerInitialLambdaArn
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !GetAtt MainframeAnalyzerAgent.AgentArn
@@ -1043,7 +710,7 @@ Resources:
   CheckStatusLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref CheckStatusFunction
+      FunctionName: !Ref MainframeAnalyzerStatusLambdaArn
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !GetAtt MainframeAnalyzerAgent.AgentArn
@@ -1326,27 +993,3 @@ Outputs:
     Value: !Ref MainframeAnalyzerAgentAlias
     Export:
       Name: !Sub '${AWS::StackName}-MainframeAnalyzerAgentAliasId'
-
-  CfnGeneratorFunctionArn:
-    Description: 'ARN of the CloudFormation Generator Lambda Function'
-    Value: !GetAtt CfnGeneratorFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-CfnGeneratorFunctionArn'
-
-  CfnStatusCheckFunctionArn:
-    Description: 'ARN of the CloudFormation Status Check Lambda Function'
-    Value: !GetAtt CfnStatusCheckFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-CfnStatusCheckFunctionArn'
-
-  StartAnalysisFunctionArn:
-    Description: 'ARN of the Start Analysis Lambda Function'
-    Value: !GetAtt StartAnalysisFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-StartAnalysisFunctionArn'
-
-  CheckStatusFunctionArn:
-    Description: 'ARN of the Check Status Lambda Function'
-    Value: !GetAtt CheckStatusFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-CheckStatusFunctionArn'
