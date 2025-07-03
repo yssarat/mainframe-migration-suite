@@ -565,10 +565,34 @@ echo "4. Use the Test tab to interact with the platform"
 echo ""
 echo "=== EXAMPLE INTERACTIONS ==="
 echo "• 'Generate CloudFormation templates from s3://my-bucket/configs/'"
-echo "• 'Analyze mainframe documentation in s3://my-bucket/docs/'"
+echo "• 'Analyze mainframe documentation in s3://${TRANSFORM_BUCKET}/sample-docs/'"
 echo "• 'Check the status of job 12345'"
 echo ""
+echo "=== SAMPLE FILES UPLOADED ==="
+echo "Ready-to-test mainframe documentation:"
+echo "• s3://${TRANSFORM_BUCKET}/sample-docs/CBACT01C-cbl-0.4.4.pdf (COBOL program)"
+echo "• s3://${TRANSFORM_BUCKET}/sample-docs/READACCT-jcl-0.4.4.pdf (JCL job)"
+echo ""
 print_success "Platform deployment completed successfully!"
+
+# Upload sample mainframe documentation files for testing
+print_status "Uploading sample mainframe documentation files for testing..."
+
+if [[ -d "tests/mainframe-docs" ]]; then
+    # Upload sample files to the transform bucket for immediate testing
+    if [[ -n "$PROFILE" ]]; then
+        aws s3 cp tests/mainframe-docs/ "s3://${TRANSFORM_BUCKET}/sample-docs/" --recursive --region "$REGION" --profile "$PROFILE" || {
+            print_warning "Failed to upload sample documentation files"
+        }
+    else
+        aws s3 cp tests/mainframe-docs/ "s3://${TRANSFORM_BUCKET}/sample-docs/" --recursive --region "$REGION" || {
+            print_warning "Failed to upload sample documentation files"
+        }
+    fi
+    print_success "Sample mainframe documentation uploaded to: s3://${TRANSFORM_BUCKET}/sample-docs/"
+else
+    print_warning "No sample documentation found in tests/mainframe-docs/ directory"
+fi
 
 # Optional: Run basic health checks
 print_status "Running basic health checks..."

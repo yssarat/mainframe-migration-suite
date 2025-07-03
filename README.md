@@ -107,6 +107,14 @@ cd mainframe-modernization-platform
 
 ### Usage
 
+#### Sample Documentation Files
+
+The deployment automatically uploads sample mainframe documentation files for immediate testing:
+- **CBACT01C-cbl-0.4.4.pdf** - COBOL program documentation
+- **READACCT-jcl-0.4.4.pdf** - JCL job documentation
+
+These files are uploaded to `s3://mainframe-transform-{env}-{account-id}/sample-docs/` during deployment.
+
 #### Using the Bedrock Agent Interface
 
 1. Navigate to the Amazon Bedrock console
@@ -123,7 +131,7 @@ Supervisor: "I'll connect you with the CloudFormation Generator Agent to help yo
 ```
 
 ```
-User: "I need to analyze our mainframe documentation for modernization planning"
+User: "I need to analyze our mainframe documentation for modernization planning. Please analyze the sample files in s3://mainframe-transform-dev-{account-id}/sample-docs/"
 
 Supervisor: "I'll connect you with the Mainframe Documentation Analyzer Agent to help you analyze your systems and provide modernization recommendations..."
 ```
@@ -142,7 +150,7 @@ aws lambda invoke \
 ```bash
 aws lambda invoke \
   --function-name MainframeAnalyzer-Initial \
-  --payload '{"bucket_name":"my-bucket","s3_folder":"docs"}' \
+  --payload '{"bucket_name":"mainframe-transform-dev-{account-id}","s3_folder":"sample-docs"}' \
   response.json
 ```
 
