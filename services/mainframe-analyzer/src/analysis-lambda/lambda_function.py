@@ -118,7 +118,7 @@ def call_llm_converse(prompt: str, wait: bool = True, timeout_seconds: int = 300
             modelId=model_id,
             messages=messages,
             inferenceConfig={
-                "maxTokens": 200000,
+                "maxTokens": 131000,
                 "temperature": 0.1,
                 "topP": 0.9
             }
