@@ -359,7 +359,7 @@ def lambda_handler(event, context):
             'folder_path': folder_path,
             'output_path': f"s3://{bucket_name}/mainframe-analysis/{job_id}/",
             'created_at': job_record['created_at'],
-            'estimated_completion_time': f"Approximately {len(files) * 2} seconds"
+            'estimated_completion_time': "Estimated completion time: Several minutes (typically 15-30 minutes depending on document complexity)"
         }
         
         if is_bedrock_agent:
