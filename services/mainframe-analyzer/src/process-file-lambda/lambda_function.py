@@ -21,8 +21,8 @@ def extract_text_from_pdf(file_obj: io.BytesIO) -> str:
         str: Extracted text from the PDF
     """
     try:
-        import pypdf
-        pdf_reader = pypdf.PdfReader(file_obj)
+        import PyPDF2
+        pdf_reader = PyPDF2.PdfReader(file_obj)
         text = ""
         
         for page_num in range(len(pdf_reader.pages)):

@@ -79,20 +79,14 @@ def lambda_handler(event, context):
         file_results = event.get('file_results', [])
         
         # Get configuration from environment variables or Parameter Store
-        param_store_prefix = os.environ.get('PARAMETER_STORE_PREFIX', '/mainframe-analyzer/')
+        param_store_path = os.environ.get('PARAMETER_STORE_PREFIX', '/mainframe-modernization/documentation-agent/updated-prompt')
         max_combined_chars = int(os.environ.get('MAX_COMBINED_CHARS', 100000))
         
-        # Try to get max_combined_chars from Parameter Store if configured
-        param_max_chars = max_combined_chars
-        if param_max_chars:
-            try:
-                max_combined_chars = int(param_max_chars)
-                logger.info(f"Using max_combined_chars from Parameter Store: {max_combined_chars}")
-            except ValueError:
-                logger.warning(f"Invalid max_combined_chars from Parameter Store: {param_max_chars}, using default")
+        logger.info(f"Using Parameter Store path: {param_store_path}")
+        logger.info(f"Using max_combined_chars: {max_combined_chars}")
         
         # Get the prompt template from Parameter Store
-        prompt_template = get_parameter(f"{param_store_prefix}")
+        prompt_template = get_parameter(param_store_path)
         
         if not prompt_template:
             logger.warning("Could not retrieve prompt template from Parameter Store, using default")
