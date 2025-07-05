@@ -38,7 +38,7 @@ Parameters:
 
   ParameterStorePrefix:
     Type: String
-    Default: /mainframe-modernization/documentation-agent/updated-prompt
+    Default: /mainframe-modernization/documentation-agent/dev/updated-prompt
     Description: Parameter Store parameter for LLM prompt
 
   LambdaCodeBucket:
@@ -403,7 +403,7 @@ Resources:
         Variables:
           JOBS_TABLE_NAME: !Ref JobsTable
           BEDROCK_MODEL_ID: !Ref BedrockModelId
-          PROMPT_TEMPLATE_PATH: /mainframe-modernization/documentation-agent/updated-prompt
+          PROMPT_TEMPLATE_PATH: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
 
   ResultAggregatorLambda:
     Type: AWS::Lambda::Function
@@ -423,7 +423,7 @@ Resources:
       Environment:
         Variables:
           JOBS_TABLE_NAME: !Ref JobsTable
-          PROMPT_TEMPLATE_PATH: /mainframe-modernization/documentation-agent/updated-prompt
+          PROMPT_TEMPLATE_PATH: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
 
   AnalysisLambda:
     Type: AWS::Lambda::Function
