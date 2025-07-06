@@ -122,10 +122,31 @@ CRITICAL: Generate complete, production-ready AWS artifacts in this EXACT struct
 # Mainframe Modernization - Chunk {self.chunk_index}
 
 ## Overview
-[Documentation specific to this chunk's functionality]
+This chunk implements specific components of the comprehensive AWS serverless solution to modernize mainframe batch processing systems. This section focuses on [specific functionality] while maintaining integration with the overall modernization architecture.
 
-## Components
-[Description of AWS services and components in this chunk]
+## Architecture Components
+The components in this chunk follow AWS Well-Architected Framework principles:
+
+### Key Components for Chunk {self.chunk_index}:
+- **Lambda Functions**: Process specific business logic with automatic scaling
+- **Step Functions**: Orchestrate chunk-specific workflows with error handling
+- **DynamoDB**: Store chunk-specific processed data with high performance
+- **IAM Roles**: Secure access controls following least privilege principles
+
+## Integration Points
+This chunk integrates with the overall modernization platform through:
+1. Shared S3 buckets for data exchange
+2. Common DynamoDB tables for state management
+3. Unified SNS topics for notifications
+4. EventBridge for cross-chunk communication
+
+## Deployment
+This chunk can be deployed independently or as part of the complete platform.
+
+## Security Considerations
+- All data encrypted at rest and in transit
+- IAM roles follow principle of least privilege
+- Chunk-specific resource isolation where appropriate
 ```
 
 ## REASONING
@@ -133,11 +154,50 @@ CRITICAL: Generate complete, production-ready AWS artifacts in this EXACT struct
 ```markdown
 # Analysis and Reasoning - Chunk {self.chunk_index}
 
-## Chunk Analysis
-[Analysis specific to this chunk of the mainframe system]
+## Chunk-Specific Analysis
+This chunk addresses specific aspects of the mainframe modernization project, focusing on [specific functionality area].
 
-## AWS Service Selection
-[Reasoning for chosen AWS services for this chunk]
+## AWS Service Selection for This Chunk
+
+### Lambda Functions for Chunk Processing
+**Selection Reasoning**: Lambda functions in this chunk were chosen because:
+1. **Specific Processing Logic**: Each function handles discrete operations relevant to this chunk
+2. **Integration**: Seamless integration with other chunk components and overall platform
+3. **Scalability**: Automatic scaling for chunk-specific workloads
+4. **Cost Efficiency**: Pay-per-use model for chunk-specific processing
+
+### Step Functions for Chunk Orchestration
+**Selection Reasoning**: Step Functions orchestrate chunk-specific workflows:
+1. **Workflow Isolation**: Chunk-specific workflows can be managed independently
+2. **Error Handling**: Built-in retry and error handling for chunk operations
+3. **State Management**: Maintains state across chunk-specific processing steps
+4. **Monitoring**: Detailed visibility into chunk-specific execution
+
+### DynamoDB for Chunk Data
+**Selection Reasoning**: DynamoDB stores chunk-specific data:
+1. **Performance**: Fast access to chunk-specific data
+2. **Scalability**: Handles varying data volumes for this chunk
+3. **Integration**: Works seamlessly with chunk Lambda functions
+4. **Consistency**: Maintains data consistency within chunk operations
+
+## Integration Strategy
+This chunk integrates with the overall platform through:
+- **Data Flow**: Receives input from previous chunks, provides output to subsequent chunks
+- **State Management**: Maintains chunk state in shared DynamoDB tables
+- **Error Handling**: Participates in platform-wide error handling and retry mechanisms
+- **Monitoring**: Contributes metrics to platform-wide monitoring dashboards
+
+## Performance Considerations for This Chunk
+- Lambda memory allocation optimized for chunk-specific processing requirements
+- DynamoDB capacity planning based on chunk-specific access patterns
+- Step Functions workflow design optimized for chunk processing efficiency
+- Error handling and retry logic tailored to chunk-specific failure modes
+
+## Security Considerations for This Chunk
+- IAM roles scoped to minimum permissions required for chunk operations
+- Data encryption for chunk-specific sensitive information
+- Network isolation where appropriate for chunk processing
+- Audit logging for chunk-specific operations
 ```
 
 Continue this pattern for ALL AWS services relevant to this chunk. Each file must be:

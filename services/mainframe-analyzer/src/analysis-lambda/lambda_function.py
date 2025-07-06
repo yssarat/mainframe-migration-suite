@@ -136,34 +136,368 @@ Resources:
 # Mainframe Modernization Project
 
 ## Overview
-[Complete project documentation with architecture, deployment, and usage instructions]
+This project implements a comprehensive AWS serverless solution to modernize mainframe batch processing systems. The solution replaces traditional mainframe components with cloud-native AWS services, providing improved scalability, reliability, and cost efficiency while maintaining functional compatibility with existing business processes.
 
 ## Architecture
-[Detailed architecture explanation]
+The modernized architecture follows AWS Well-Architected Framework principles and implements an event-driven, serverless design:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   S3 Input      │    │   Lambda        │    │   DynamoDB      │
+│   Bucket        │───▶│   Functions     │───▶│   Tables        │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │              ┌─────────────────┐              │
+         │              │  Step Functions │              │
+         └─────────────▶│   Workflow      │◀─────────────┘
+                        └─────────────────┘
+                                 │
+                        ┌─────────────────┐
+                        │   S3 Output     │
+                        │   Bucket        │
+                        └─────────────────┘
+                                 │
+                        ┌─────────────────┐
+                        │   SNS Topics    │
+                        │  & EventBridge  │
+                        └─────────────────┘
+```
+
+### Key Components:
+- **S3 Input Bucket**: Receives mainframe data files with event triggers
+- **Lambda Functions**: Process business logic with automatic scaling
+- **Step Functions**: Orchestrate complex workflows with error handling
+- **DynamoDB**: Store processed data with high performance
+- **S3 Output Bucket**: Store generated reports and processed files
+- **SNS/EventBridge**: Handle notifications and event routing
+- **CloudWatch**: Monitor all components with comprehensive logging
+
+## Data Flow
+1. Mainframe data files uploaded to S3 Input Bucket
+2. S3 event triggers Lambda function for initial processing
+3. Step Functions orchestrates multi-step workflow
+4. Lambda functions process data and store in DynamoDB
+5. Output generation Lambda creates reports in S3 Output Bucket
+6. SNS notifications sent for completion/errors
+7. EventBridge routes events for downstream processing
 
 ## Deployment
-[Step-by-step deployment guide]
+### Prerequisites
+- AWS CLI configured with appropriate permissions
+- CloudFormation deployment capabilities
+- S3 buckets for Lambda deployment packages
 
-## Usage
-[Usage examples and API documentation]
+### Deployment Steps
+1. Deploy infrastructure using CloudFormation template
+2. Upload Lambda function packages to deployment bucket
+3. Configure environment variables and parameters
+4. Test workflow with sample data files
+5. Configure monitoring and alerting
+
+## Security Considerations
+- All data encrypted at rest and in transit
+- IAM roles follow principle of least privilege
+- VPC endpoints for secure service communication
+- KMS encryption for sensitive data
+- CloudTrail logging for audit compliance
+
+## Cost Optimization
+- Serverless architecture eliminates idle resource costs
+- DynamoDB on-demand pricing for variable workloads
+- S3 lifecycle policies for automatic archiving
+- Lambda memory optimization for cost efficiency
+- CloudWatch log retention policies
+
+## Monitoring and Logging
+- CloudWatch dashboards for operational visibility
+- Custom metrics for business KPIs
+- Automated alerting for error conditions
+- X-Ray tracing for performance analysis
+- Structured logging across all components
+
+## Error Handling
+- Comprehensive retry mechanisms with exponential backoff
+- Dead letter queues for failed message processing
+- Circuit breaker patterns for external dependencies
+- Graceful degradation for non-critical failures
+- Automated recovery procedures where possible
 ```
 
 ## REASONING
-### modernization_analysis.md
+### reasoning.md
 ```markdown
-# Modernization Analysis and Reasoning
+# Detailed Service Selection Reasoning for Mainframe Modernization
 
-## Current State Assessment
-[Analysis of existing mainframe systems]
+## AWS Service Selection Methodology
 
-## Modernization Strategy
-[Detailed reasoning for chosen AWS services and architecture]
+This document provides comprehensive reasoning for each AWS service selection in the mainframe modernization project, including alternatives considered, trade-offs made, and consistency explanations for similar components.
 
-## Migration Approach
-[Step-by-step migration strategy]
+## Core Processing Services
 
-## Risk Assessment
-[Identified risks and mitigation strategies]
+### AWS Lambda for Business Logic Processing
+
+**Selection Reasoning**: AWS Lambda was chosen as the primary compute service because:
+
+1. **Stateless Processing**: The original mainframe program performs discrete data processing operations that map perfectly to Lambda's stateless execution model
+2. **Event-Driven Architecture**: Lambda integrates seamlessly with S3 events, allowing automatic triggering when new data files are uploaded
+3. **Cost Efficiency**: Pay-per-use pricing model is ideal for batch processing workloads that may run infrequently
+4. **Scalability**: Automatic scaling handles varying volumes of data without manual intervention
+5. **Language Support**: Allows reimplementation of legacy COBOL logic in modern languages like Python
+
+**Alternatives Considered**:
+- **EC2 Instances**: Rejected due to higher operational overhead and continuous running costs even during idle periods
+- **AWS Batch**: Considered but deemed unnecessary for this processing complexity level
+- **AWS Fargate**: Rejected as containerization adds complexity without significant benefits for this workload
+
+**Trade-offs**:
+- Lambda has 15-minute execution time limit, but this is sufficient for expected data volumes
+- Cold start latency may impact initial processing time, but acceptable for batch operations
+- Memory limitations require careful optimization for large data processing
+
+### AWS Step Functions for Workflow Orchestration
+
+**Selection Reasoning**: Step Functions was selected for workflow orchestration because:
+
+1. **Visual Workflow**: Provides clear visual representation of processing steps, improving maintainability
+2. **Error Handling**: Built-in retry mechanisms and error handling improve system reliability
+3. **State Management**: Maintains workflow state across multiple Lambda invocations
+4. **Integration**: Native integration with Lambda, DynamoDB, and other AWS services
+5. **Monitoring**: Detailed execution history and CloudWatch integration for operational visibility
+
+**Alternatives Considered**:
+- **SQS/SNS Chains**: More complex to manage and monitor without visual workflow benefits
+- **Custom Orchestration Logic**: Would require additional development and maintenance effort
+- **AWS Batch**: Lacks the fine-grained control and visual workflow representation
+
+**Trade-offs**:
+- Step Functions adds a small cost overhead, but operational benefits outweigh this concern
+- Introduces another service to learn and manage, but simplifies overall architecture complexity
+
+## Data Storage Services
+
+### Amazon DynamoDB for Structured Data
+
+**Selection Reasoning**: DynamoDB was chosen for processed account data because:
+
+1. **Schema Flexibility**: Accommodates various account record structures without rigid schema constraints
+2. **Performance**: Single-digit millisecond response times support rapid data retrieval
+3. **Scalability**: Automatic scaling handles varying data volumes without manual intervention
+4. **Integration**: Seamless integration with Lambda and other AWS services
+5. **Managed Service**: No operational overhead for database management, patching, or backups
+
+**Alternatives Considered**:
+- **Amazon RDS**: Rejected as the relational model adds unnecessary complexity for this data structure
+- **Amazon DocumentDB**: Overkill for the relatively simple document structure of account records
+- **Amazon Neptune**: The data doesn't have complex relationships requiring a graph database
+
+**Trade-offs**:
+- DynamoDB pricing can be higher for large data volumes, but expected volume is manageable
+- Query flexibility is more limited compared to SQL databases, but access patterns are simple and well-defined
+- Eventually consistent reads may require careful application design
+
+### Amazon S3 for File Storage
+
+**Selection Reasoning**: S3 was selected to replace traditional file systems because:
+
+1. **Durability**: 99.999999999% durability far exceeds traditional file systems
+2. **Scalability**: Virtually unlimited storage capacity eliminates capacity planning concerns
+3. **Event Notifications**: S3 can trigger Lambda functions when new files are uploaded
+4. **Versioning**: Provides audit trail and recovery options not available in original system
+5. **Cost Efficiency**: Tiered storage classes allow cost optimization based on access patterns
+
+**Alternatives Considered**:
+- **EFS/FSx**: Rejected as they introduce unnecessary complexity for simple file operations
+- **Amazon Glacier**: Too slow for operational data that needs regular access
+- **Database BLOBs**: Would complicate the architecture without adding significant value
+
+**Trade-offs**:
+- S3 doesn't support traditional file locking mechanisms, but not required for read-only processing
+- Eventual consistency for overwrite operations, but doesn't impact our create-new-object workflow
+
+## Integration and Communication Services
+
+### Amazon SNS for Notifications
+
+**Selection Reasoning**: SNS was chosen for system notifications because:
+
+1. **Pub/Sub Model**: Decouples notification producers from consumers
+2. **Multiple Protocols**: Supports email, SMS, HTTP, and other delivery methods
+3. **Reliability**: Built-in retry mechanisms and dead letter queues
+4. **Integration**: Native integration with other AWS services
+5. **Scalability**: Handles high-volume notification scenarios
+
+**Alternatives Considered**:
+- **Amazon SES**: Limited to email notifications only
+- **Custom Notification System**: Would require additional development and maintenance
+- **Third-party Services**: Adds external dependencies and potential security concerns
+
+### Amazon EventBridge for Event Routing
+
+**Selection Reasoning**: EventBridge was selected for event-driven communication because:
+
+1. **Event Routing**: Sophisticated routing based on event content and patterns
+2. **Schema Registry**: Manages event schemas for consistency across services
+3. **Integration**: Connects with numerous AWS and third-party services
+4. **Filtering**: Advanced filtering capabilities reduce unnecessary processing
+5. **Replay**: Event replay capabilities for debugging and recovery scenarios
+
+**Alternatives Considered**:
+- **Amazon SQS**: Limited routing capabilities and requires more complex architecture
+- **Amazon SNS**: Less sophisticated filtering and routing capabilities
+- **Custom Event System**: Would require significant development effort and maintenance
+
+## Monitoring and Observability
+
+### Amazon CloudWatch for Monitoring
+
+**Selection Reasoning**: CloudWatch was selected because:
+
+1. **Integrated Monitoring**: Native integration with all AWS services used in the solution
+2. **Custom Metrics**: Ability to track business-specific metrics and KPIs
+3. **Alerting**: Configurable alarms for operational anomalies and threshold breaches
+4. **Log Aggregation**: Centralized logging from all components with structured search
+5. **Log Insights**: Powerful query capabilities for log analysis and troubleshooting
+
+**Alternatives Considered**:
+- **Third-party Monitoring Tools**: Would add unnecessary complexity, cost, and external dependencies
+- **Custom Logging Solutions**: Would require additional development and maintenance overhead
+
+## Performance Considerations
+
+### Lambda Optimization Strategy
+- Function memory allocation tuned based on processing requirements and cost optimization
+- Code optimization to minimize execution time and reduce costs
+- Connection pooling and reuse for database connections
+- Warm start strategies implemented for critical functions
+
+### DynamoDB Performance Tuning
+- Appropriate provisioning of read/write capacity based on usage patterns
+- Effective partition key design for even data distribution
+- Global Secondary Indexes (GSI) for alternative access patterns
+- DynamoDB Accelerator (DAX) consideration for high-read scenarios
+
+### S3 Transfer Optimization
+- Multipart uploads for large files to improve reliability and performance
+- S3 Transfer Acceleration for remote uploads when needed
+- Appropriate storage class selection based on access patterns
+- CloudFront integration for frequently accessed content
+
+## Scalability Analysis
+
+### Horizontal Scalability
+- Lambda automatically scales to handle increased processing load up to account limits
+- DynamoDB scales horizontally with auto-scaling policies and on-demand pricing
+- S3 provides virtually unlimited storage capacity with automatic scaling
+- Step Functions can handle increased workflow complexity and volume
+
+### Vertical Scalability
+- Lambda memory allocation can be increased for more CPU power (up to 10GB)
+- DynamoDB can be provisioned for higher throughput when needed
+- Multi-region deployment for geographic scaling and disaster recovery
+
+### Scaling Limitations
+- Lambda concurrent execution limits (default 1000, can be increased)
+- API rate limits for service interactions may require throttling
+- DynamoDB partition throughput limitations require careful key design
+- Step Functions execution history retention limits
+
+## Operational Complexity Assessment
+
+### Deployment Complexity
+- Infrastructure as Code (CloudFormation) reduces deployment complexity and errors
+- CI/CD pipelines automate deployment processes and reduce manual intervention
+- Blue/green deployment strategy minimizes risk and downtime
+- Automated testing ensures reliable updates and reduces regression risk
+
+### Monitoring Complexity
+- Centralized CloudWatch dashboards provide comprehensive operational visibility
+- Automated alerts reduce manual monitoring overhead and improve response time
+- Log insights and X-Ray tracing simplify troubleshooting and root cause analysis
+- Standardized logging format across all components improves consistency
+
+### Maintenance Overhead
+- Serverless architecture minimizes infrastructure maintenance requirements
+- Managed services reduce operational burden for database management, patching
+- Automated testing and deployment reduce manual maintenance tasks
+- Self-healing capabilities reduce manual intervention requirements
+
+## Consistency Explanations
+
+### Similar Component Mapping
+- All file processing operations use Lambda for consistency in execution model
+- All structured data storage uses DynamoDB for uniform access patterns and performance
+- All workflow orchestration uses Step Functions for consistent management and monitoring
+- All notifications use SNS for uniform delivery mechanisms
+
+### Naming Conventions
+- Consistent resource naming patterns across all AWS services
+- Standardized environment variable naming for configuration management
+- Uniform tagging strategy for all resources to support cost allocation and management
+- Consistent IAM role and policy naming for security management
+
+### Security Controls
+- Consistent IAM role patterns across all services with least privilege principles
+- Uniform encryption standards for all data storage (KMS encryption)
+- Standardized VPC and security group configurations where applicable
+- Consistent logging and monitoring patterns for security audit compliance
+
+## Cost Optimization Strategies
+
+### Service Selection for Cost
+- Serverless services chosen to eliminate idle resource costs
+- Pay-per-use pricing models align costs with actual business usage
+- Managed services reduce operational overhead costs and staffing requirements
+- Auto-scaling capabilities prevent over-provisioning and reduce waste
+
+### Storage Optimization
+- S3 lifecycle policies automatically transition data to cheaper storage classes
+- DynamoDB on-demand pricing for variable workloads eliminates capacity planning
+- CloudWatch log retention policies manage storage costs for operational logs
+- Data compression and efficient serialization formats reduce storage costs
+
+### Compute Optimization
+- Lambda memory optimization balances performance and cost
+- Step Functions reduce overall execution time through parallel processing
+- Efficient algorithms and data structures minimize processing time and costs
+
+## Risk Assessment and Mitigation
+
+### Technical Risks
+- **Lambda timeout limitations**: Mitigated through workflow design and data chunking
+- **DynamoDB throttling**: Addressed through proper capacity planning and auto-scaling
+- **S3 eventual consistency**: Handled through application design and retry logic
+- **Service limits**: Monitored proactively with automated limit increase requests
+
+### Operational Risks
+- **Service outages**: Multi-region deployment and disaster recovery procedures
+- **Data loss**: Comprehensive backup strategies and point-in-time recovery
+- **Security breaches**: Defense-in-depth security model with multiple layers
+- **Cost overruns**: Automated cost monitoring and alerting with budget controls
+
+### Business Risks
+- **Performance degradation**: Comprehensive monitoring and automated scaling
+- **Data accuracy**: Validation and reconciliation processes at multiple points
+- **Compliance violations**: Automated compliance checking and audit trails
+
+## Future Extensibility
+
+### Architecture Flexibility
+- Microservices design enables independent scaling and deployment of components
+- Event-driven architecture supports easy integration of new services and capabilities
+- API-first approach facilitates future enhancements and third-party integrations
+- Modular design allows for incremental improvements and feature additions
+
+### Technology Evolution
+- Serverless architecture adapts automatically to new AWS service capabilities
+- Container support available through Lambda container images for complex dependencies
+- Machine learning integration possible through AWS AI/ML services (SageMaker, Comprehend)
+- Real-time processing capabilities through Kinesis and Lambda integration
+
+### Business Growth
+- Architecture scales automatically with business growth and increased data volumes
+- Multi-tenant design supports expansion to multiple business units or customers
+- International expansion supported through multi-region deployment capabilities
+- Integration capabilities support merger and acquisition scenarios
 ```
 
 Continue this pattern for ALL AWS services. Each file must be:
@@ -757,7 +1091,7 @@ def process_with_streaming_extraction(prompt: str, bucket_name: str, output_path
     print("[STREAMING] Starting streaming file extraction analysis")
     
     # Create the streaming extractor
-    extractor = StreamingFileExtractor(bucket_name, f"{output_path}/individual_files")
+    extractor = StreamingFileExtractor(bucket_name, f"{output_path}/aws_artifacts")
     
     try:
         # Stream the response and process in real-time
