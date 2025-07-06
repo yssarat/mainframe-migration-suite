@@ -360,7 +360,26 @@ if [[ -d "services/cfn-generator/src" ]]; then
             done
         }
     else
-        print_warning "CFN Generator deploy script not found, skipping Lambda packaging..."
+        print_warning "CFN Generator deploy script not found, checking for pre-built packages..."
+        # Check if pre-built Lambda packages exist in dist directory
+        if [[ -d "dist" ]] && [[ -n "$(ls -A dist/*.zip 2>/dev/null)" ]]; then
+            print_status "Found pre-built Lambda packages, uploading to S3..."
+            aws s3 cp dist/ "s3://${CFN_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" || {
+                print_error "Failed to upload pre-built CFN Generator Lambda packages"
+                exit 1
+            }
+            
+            # Fix naming for packages that need -lambda suffix
+            for package in completion generator; do
+                if aws s3 ls "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" >/dev/null 2>&1; then
+                    aws s3 cp "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}-lambda.zip" --region "$REGION" || true
+                fi
+            done
+            print_success "CFN Generator Lambda packages uploaded successfully"
+        else
+            print_error "No pre-built Lambda packages found in dist directory"
+            exit 1
+        fi
     fi
     cd ../..
 fi
@@ -381,7 +400,19 @@ if [[ -d "services/mainframe-analyzer/src" ]]; then
             print_warning "Failed to copy Lambda packages, deployment may fail..."
         }
     else
-        print_warning "Mainframe Analyzer package script not found, skipping Lambda packaging..."
+        print_warning "Mainframe Analyzer package script not found, checking for pre-built packages..."
+        # Check if pre-built Lambda packages exist in dist directory
+        if [[ -d "dist" ]] && [[ -n "$(ls -A dist/*.zip 2>/dev/null)" ]]; then
+            print_status "Found pre-built Lambda packages, uploading to S3..."
+            aws s3 cp dist/ "s3://${ANALYZER_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" || {
+                print_error "Failed to upload pre-built Mainframe Analyzer Lambda packages"
+                exit 1
+            }
+            print_success "Mainframe Analyzer Lambda packages uploaded successfully"
+        else
+            print_error "No pre-built Lambda packages found in dist directory"
+            exit 1
+        fi
     fi
     cd ../..
 fi

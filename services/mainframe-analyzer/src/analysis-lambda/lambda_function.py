@@ -6,7 +6,8 @@ import os
 import time
 import traceback
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Generator, Optional
+from dataclasses import dataclass
 
 # Initialize clients
 s3_client = boto3.client('s3')
@@ -14,6 +15,434 @@ dynamodb = boto3.resource('dynamodb')
 
 # Initialize global variable for throttling
 time_last = 0
+
+@dataclass
+class StreamingFile:
+    filename: str
+    content: str
+    file_type: str
+    section: str
+    is_complete: bool = False
+
+class StreamingFileExtractor:
+    """
+    Enhanced streaming analyzer that extracts individual files in real-time
+    """
+    
+    def __init__(self, bucket_name: str, output_prefix: str):
+        self.s3_client = boto3.client('s3')
+        self.bedrock_client = boto3.client('bedrock-runtime')
+        self.bucket_name = bucket_name
+        self.output_prefix = output_prefix
+        
+        # Streaming state
+        self.buffer = ""
+        self.current_section = None
+        self.current_file = None
+        self.current_content = []
+        self.files_created = []
+        
+        # Enhanced section and file patterns for mainframe modernization
+        self.section_patterns = {
+            'LAMBDA_FUNCTIONS': r'^##\s*LAMBDA[_\s]*FUNCTIONS?',
+            'IAM_ROLES': r'^##\s*IAM[_\s]*ROLES?',
+            'DYNAMODB': r'^##\s*DYNAMO[_\s]*DB',
+            'S3': r'^##\s*S3',
+            'SQS_SNS_EVENTBRIDGE': r'^##\s*(?:SQS[_\s]*SNS[_\s]*EVENTBRIDGE|MESSAGING)',
+            'STEP_FUNCTIONS': r'^##\s*STEP[_\s]*FUNCTIONS?',
+            'AWS_GLUE': r'^##\s*(?:AWS[_\s]*GLUE|GLUE)',
+            'API_GATEWAY': r'^##\s*API[_\s]*GATEWAY',
+            'ECS_FARGATE': r'^##\s*(?:ECS|FARGATE|CONTAINERS)',
+            'RDS': r'^##\s*RDS',
+            'CLOUDFORMATION': r'^##\s*(?:CLOUDFORMATION|CFN)',
+            'OTHER_SERVICES': r'^##\s*OTHER[_\s]*SERVICES',
+            'README': r'^##\s*README',
+            'REASONING': r'^##\s*REASONING',
+            'ARCHITECTURE': r'^##\s*ARCHITECTURE'
+        }
+        
+        # Special documentation sections that should go to documentation folder
+        self.documentation_sections = {'README', 'REASONING', 'ARCHITECTURE'}
+        
+        self.file_patterns = {
+            'python': r'^###\s*(.+\.py)',
+            'json': r'^###\s*(.+\.json)',
+            'yaml': r'^###\s*(.+\.ya?ml)',
+            'markdown': r'^###\s*(.+\.md)',
+            'shell': r'^###\s*(.+\.sh)',
+            'sql': r'^###\s*(.+\.sql)',
+            'dockerfile': r'^###\s*(Dockerfile.*)',
+            'terraform': r'^###\s*(.+\.tf)',
+            'properties': r'^###\s*(.+\.properties)'
+        }
+
+    def stream_bedrock_response(self, prompt: str) -> Generator[str, None, None]:
+        """Stream response from Bedrock with enhanced system prompt for mainframe modernization"""
+        try:
+            model_id = os.environ.get('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
+            
+            # Enhanced system prompt for mainframe modernization with structured output
+            system_prompt = """You are an expert AWS architect specializing in mainframe modernization. 
+
+CRITICAL: Generate complete, production-ready AWS artifacts in this EXACT structure:
+
+## LAMBDA_FUNCTIONS
+### function_name.py
+```python
+[Complete Python Lambda function with all imports, error handling, and logging]
+```
+
+## IAM_ROLES  
+### role_name.json
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [complete IAM policy]
+}
+```
+
+## STEP_FUNCTIONS
+### workflow_name.json
+```json
+{
+  "Comment": "Mainframe modernization workflow",
+  "StartAt": "...",
+  [complete state machine definition]
+}
+```
+
+## DYNAMODB
+### table_name.json
+```json
+{
+  "TableName": "...",
+  "AttributeDefinitions": [...],
+  [complete table definition]
+}
+```
+
+## CLOUDFORMATION
+### template_name.yaml
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Mainframe modernization infrastructure'
+Resources:
+  [complete CloudFormation template]
+```
+
+## README
+### README.md
+```markdown
+# Mainframe Modernization Project
+
+## Overview
+[Complete project documentation with architecture, deployment, and usage instructions]
+
+## Architecture
+[Detailed architecture explanation]
+
+## Deployment
+[Step-by-step deployment guide]
+
+## Usage
+[Usage examples and API documentation]
+```
+
+## REASONING
+### modernization_analysis.md
+```markdown
+# Modernization Analysis and Reasoning
+
+## Current State Assessment
+[Analysis of existing mainframe systems]
+
+## Modernization Strategy
+[Detailed reasoning for chosen AWS services and architecture]
+
+## Migration Approach
+[Step-by-step migration strategy]
+
+## Risk Assessment
+[Identified risks and mitigation strategies]
+```
+
+Continue this pattern for ALL AWS services. Each file must be:
+- Complete and deployable
+- Include proper error handling
+- Follow AWS best practices
+- Include monitoring and logging
+- Be production-ready
+
+Focus on mainframe modernization patterns like:
+- Batch processing with Step Functions
+- Data transformation with Glue
+- Legacy system integration
+- Event-driven architectures
+- Microservices decomposition"""
+            
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 131000,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            print(f"[BEDROCK] Starting streaming response for mainframe modernization analysis")
+            
+            response = self.bedrock_client.invoke_model_with_response_stream(
+                modelId=model_id,
+                body=json.dumps(request_body)
+            )
+            
+            total_chars = 0
+            for event in response['body']:
+                if 'chunk' in event:
+                    chunk = event['chunk']
+                    if 'bytes' in chunk:
+                        chunk_data = json.loads(chunk['bytes'].decode())
+                        if chunk_data['type'] == 'content_block_delta':
+                            if 'delta' in chunk_data and 'text' in chunk_data['delta']:
+                                text_chunk = chunk_data['delta']['text']
+                                total_chars += len(text_chunk)
+                                
+                                if total_chars % 10000 == 0:
+                                    print(f"[BEDROCK] Streamed {total_chars:,} characters, created {len(self.files_created)} files")
+                                
+                                yield text_chunk
+                                
+            print(f"[BEDROCK] Completed streaming {total_chars:,} total characters")
+                                
+        except Exception as e:
+            print(f"[BEDROCK ERROR] {str(e)}")
+            yield f"Error: {str(e)}"
+
+    def process_streaming_chunk(self, chunk: str):
+        """Process each streaming chunk and extract files in real-time"""
+        self.buffer += chunk
+        
+        # Process complete lines
+        while '\n' in self.buffer:
+            line, self.buffer = self.buffer.split('\n', 1)
+            self.process_line(line)
+
+    def process_line(self, line: str):
+        """Process a single line and manage sections/files"""
+        line_stripped = line.strip()
+        
+        # Check for section headers
+        new_section = self.detect_section(line_stripped)
+        if new_section:
+            # Save current file if we have one
+            if self.current_file and self.current_content:
+                self.save_current_file()
+            
+            self.current_section = new_section
+            self.current_file = None
+            self.current_content = []
+            print(f"[SECTION] Started section: {new_section}")
+            
+            # Auto-create files for documentation sections if no explicit file header follows
+            if new_section in self.documentation_sections:
+                # Set a default filename for documentation sections
+                if new_section == 'README':
+                    self.current_file = 'README.md'
+                elif new_section == 'REASONING':
+                    self.current_file = 'modernization_analysis.md'
+                elif new_section == 'ARCHITECTURE':
+                    self.current_file = 'architecture.md'
+                
+                if self.current_file:
+                    print(f"[FILE] Auto-created file: {self.current_file} for section {new_section}")
+            
+            return
+        
+        # Check for file headers
+        new_file = self.detect_file(line_stripped)
+        if new_file and self.current_section:
+            # Save previous file if we have one
+            if self.current_file and self.current_content:
+                self.save_current_file()
+            
+            self.current_file = new_file
+            self.current_content = []
+            print(f"[FILE] Started file: {new_file} in section {self.current_section}")
+            return
+        
+        # Add content to current file or section
+        if self.current_section:
+            # For documentation sections without explicit file headers, start collecting content
+            if self.current_section in self.documentation_sections and not self.current_file:
+                # Auto-create file if we haven't already
+                if self.current_section == 'README':
+                    self.current_file = 'README.md'
+                elif self.current_section == 'REASONING':
+                    self.current_file = 'modernization_analysis.md'
+                elif self.current_section == 'ARCHITECTURE':
+                    self.current_file = 'architecture.md'
+                
+                if self.current_file:
+                    print(f"[FILE] Auto-created file: {self.current_file} for content in section {self.current_section}")
+            
+            # Add content if we have a current file
+            if self.current_file:
+                self.current_content.append(line)
+                
+                # Save file when we detect it's complete
+                if self.is_file_complete(line_stripped):
+                    self.save_current_file()
+
+    def detect_section(self, line: str) -> Optional[str]:
+        """Detect section headers"""
+        for section_name, pattern in self.section_patterns.items():
+            if re.match(pattern, line, re.IGNORECASE):
+                return section_name
+        return None
+
+    def detect_file(self, line: str) -> Optional[str]:
+        """Detect file headers"""
+        for file_type, pattern in self.file_patterns.items():
+            match = re.match(pattern, line, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def is_file_complete(self, line: str) -> bool:
+        """Check if current file is complete"""
+        if not self.current_content:
+            return False
+        
+        # For documentation sections, save when we hit another section or significant content
+        if self.current_section in self.documentation_sections:
+            # Save when we detect a new section starting
+            if self.detect_section(line):
+                return True
+            
+            # Save documentation files when they have substantial content (more than 20 lines)
+            if len(self.current_content) > 20:
+                # Look for natural break points in documentation
+                if line.strip() == '' and len(self.current_content) > 50:
+                    return True
+        
+        # Check for code block endings
+        if line == '```' and len(self.current_content) > 10:
+            return True
+        
+        # Check for next file/section starting
+        if (self.detect_file(line) or self.detect_section(line)) and len(self.current_content) > 5:
+            return True
+        
+        # For large files, save periodically
+        if len(self.current_content) > 500:
+            return True
+        
+        return False
+
+    def save_current_file(self):
+        """Save the current file to S3"""
+        if not self.current_file or not self.current_content:
+            return
+        
+        # Clean and prepare content
+        content = self.clean_file_content('\n'.join(self.current_content))
+        
+        if len(content.strip()) < 50:  # Skip tiny files
+            return
+        
+        # Determine file path
+        # Map documentation sections to documentation folder
+        if self.current_section in self.documentation_sections:
+            section_folder = "documentation"
+        else:
+            section_folder = self.current_section.lower().replace('_', '-')
+        file_path = f"{self.output_prefix}/{section_folder}/{self.current_file}"
+        
+        try:
+            # Save to S3
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=file_path,
+                Body=content.encode('utf-8'),
+                ContentType=self.get_content_type(self.current_file)
+            )
+            
+            file_info = {
+                'filename': self.current_file,
+                'section': self.current_section,
+                'size': len(content),
+                's3_path': f"s3://{self.bucket_name}/{file_path}",
+                'content_type': self.get_content_type(self.current_file)
+            }
+            
+            self.files_created.append(file_info)
+            print(f"[SAVE] Saved {self.current_file} ({len(content)} chars) to {section_folder}/")
+            
+        except Exception as e:
+            print(f"[SAVE ERROR] Failed to save {self.current_file}: {str(e)}")
+        
+        # Reset current file
+        self.current_file = None
+        self.current_content = []
+
+    def clean_file_content(self, content: str) -> str:
+        """Clean and format file content"""
+        lines = content.split('\n')
+        cleaned_lines = []
+        in_code_block = False
+        
+        for line in lines:
+            # Handle code blocks
+            if line.strip().startswith('```'):
+                if line.strip() == '```':
+                    in_code_block = False
+                    continue
+                else:
+                    in_code_block = True
+                    continue
+            
+            # Skip empty lines at start
+            if not cleaned_lines and not line.strip():
+                continue
+            
+            cleaned_lines.append(line)
+        
+        # Remove trailing empty lines
+        while cleaned_lines and not cleaned_lines[-1].strip():
+            cleaned_lines.pop()
+        
+        return '\n'.join(cleaned_lines)
+
+    def get_content_type(self, filename: str) -> str:
+        """Get content type based on file extension"""
+        if filename.endswith('.py'):
+            return 'text/x-python'
+        elif filename.endswith('.json'):
+            return 'application/json'
+        elif filename.endswith('.md'):
+            return 'text/markdown'
+        elif filename.endswith('.yaml') or filename.endswith('.yml'):
+            return 'application/x-yaml'
+        elif filename.endswith('.sh'):
+            return 'application/x-sh'
+        elif filename.endswith('.sql'):
+            return 'application/sql'
+        elif filename.endswith('.tf'):
+            return 'text/x-terraform'
+        else:
+            return 'text/plain'
+
+    def finalize_processing(self):
+        """Finalize processing and save any remaining content"""
+        # Save any remaining file
+        if self.current_file and self.current_content:
+            self.save_current_file()
+        
+        # Process any remaining buffer
+        if self.buffer.strip():
+            self.process_line(self.buffer)
+            if self.current_file and self.current_content:
+                self.save_current_file()
 
 def update_job_status(job_id: str, status: str, message: str = None) -> None:
     """Updates the job status in DynamoDB."""
@@ -321,9 +750,47 @@ def aggregate_chunk_results(chunk_results: List[Dict]) -> Dict[str, str]:
     
     return aggregated
 
+def process_with_streaming_extraction(prompt: str, bucket_name: str, output_path: str) -> Dict[str, Any]:
+    """
+    Process the prompt using streaming file extraction
+    """
+    print("[STREAMING] Starting streaming file extraction analysis")
+    
+    # Create the streaming extractor
+    extractor = StreamingFileExtractor(bucket_name, f"{output_path}/individual_files")
+    
+    try:
+        # Stream the response and process in real-time
+        for chunk in extractor.stream_bedrock_response(prompt):
+            if chunk.startswith("Error:"):
+                return {'status': 'error', 'error': chunk}
+            
+            extractor.process_streaming_chunk(chunk)
+        
+        # Finalize processing
+        extractor.finalize_processing()
+        
+        # Group files by section
+        files_by_section = {}
+        for file_info in extractor.files_created:
+            section = file_info['section']
+            if section not in files_by_section:
+                files_by_section[section] = []
+            files_by_section[section].append(file_info)
+        
+        return {
+            'status': 'success',
+            'total_files_created': len(extractor.files_created),
+            'files_by_section': files_by_section,
+            'all_files': extractor.files_created
+        }
+        
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """Lambda function handler that analyzes text using Bedrock with chunking support."""
-    print("=== ANALYSIS LAMBDA HANDLER STARTED ===")
+    """Enhanced Lambda function handler with streaming file extraction capabilities."""
+    print("=== ENHANCED ANALYSIS LAMBDA HANDLER STARTED ===")
     
     try:
         # Extract parameters from the event
@@ -331,8 +798,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         bucket_name = event.get('bucket_name')
         full_prompt_key = event.get('full_prompt_key')
         output_path = event.get('output_path', f"mainframe-analysis/{job_id}")
+        use_streaming = event.get('use_streaming', True)  # Default to streaming
         
         print(f"[JOB] ID: {job_id}, Bucket: {bucket_name}, Path: {output_path}")
+        print(f"[CONFIG] Streaming extraction enabled: {use_streaming}")
         
         # Validate required parameters
         if not all([job_id, bucket_name, full_prompt_key]):
@@ -349,108 +818,150 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         estimated_tokens = estimate_token_count(full_prompt)
         
         # Update job status
-        update_job_status(job_id, 'ANALYZING', "Starting analysis")
+        update_job_status(job_id, 'ANALYZING', "Starting enhanced analysis with streaming extraction")
         
-        # Determine if we need chunking
-        use_chunking = estimated_tokens > 150000
+        if use_streaming:
+            # Use streaming file extraction
+            print("[PROCESSING] Using streaming file extraction approach")
+            update_job_status(job_id, 'STREAMING', "Processing with real-time file extraction")
+            
+            streaming_result = process_with_streaming_extraction(full_prompt, bucket_name, output_path)
+            
+            if streaming_result['status'] == 'error':
+                update_job_status(job_id, 'ERROR', streaming_result['error'])
+                return streaming_result
+            
+            # Create summary of extracted files
+            uploaded_files = []
+            for file_info in streaming_result['all_files']:
+                uploaded_files.append({
+                    "service_type": file_info['section'],
+                    "filename": file_info['filename'],
+                    "s3_location": file_info['s3_path'],
+                    "size_bytes": file_info['size'],
+                    "content_type": file_info['content_type']
+                })
+            
+            # Update job status
+            status_message = f"Successfully extracted {streaming_result['total_files_created']} individual files using streaming"
+            update_job_status(job_id, 'COMPLETED', status_message)
+            
+            return {
+                'status': 'success',
+                'job_id': job_id,
+                'bucket_name': bucket_name,
+                'output_path': output_path,
+                'files': uploaded_files,
+                'streaming_extraction': True,
+                'files_by_section': streaming_result['files_by_section'],
+                'total_files_created': streaming_result['total_files_created']
+            }
         
-        if use_chunking:
-            print(f"[CHUNKING] Input size ({estimated_tokens:,} tokens) exceeds limit. Using chunking.")
-            update_job_status(job_id, 'CHUNKING', f"Breaking content into chunks ({estimated_tokens:,} tokens)")
-            
-            # Create chunks
-            chunks = create_chunks(full_prompt)
-            
-            if not chunks:
-                error_message = "Failed to create chunks for processing"
-                update_job_status(job_id, 'ERROR', error_message)
-                return {'status': 'error', 'error': error_message}
-            
-            # Process chunks
-            update_job_status(job_id, 'PROCESSING_CHUNKS', f"Processing {len(chunks)} chunks")
-            service_contents = process_chunks(chunks)
-            
-            if not service_contents:
-                error_message = "Failed to get results from any chunks"
-                update_job_status(job_id, 'ERROR', error_message)
-                return {'status': 'error', 'error': error_message}
-                
-            analysis_result = "Chunked processing completed successfully"
         else:
-            # Standard processing for smaller inputs
-            timeout_seconds = calculate_adaptive_timeout(prompt_length)
+            # Fall back to original chunking approach
+            print("[PROCESSING] Using traditional chunking approach")
             
-            print(f"[BEDROCK] Analyzing documentation with {timeout_seconds}s timeout")
-            analysis_result = call_llm_converse(full_prompt, wait=True, timeout_seconds=timeout_seconds)
+            # Determine if we need chunking
+            use_chunking = estimated_tokens > 150000
             
-            if analysis_result.startswith("Error:"):
-                update_job_status(job_id, 'ERROR', analysis_result)
-                return {'status': 'error', 'error': analysis_result}
-            
-            service_contents = parse_llm_response_by_service(analysis_result)
-        
-        # Save raw result for non-chunked processing
-        if not use_chunking:
-            raw_result_key = f"{output_path}/raw_analysis_result.txt"
-            s3_client.put_object(
-                Bucket=bucket_name,
-                Key=raw_result_key,
-                Body=analysis_result.encode('utf-8')
-            )
-        
-        # Create aws_artifacts subfolder
-        aws_artifacts_path = f"{output_path}/aws_artifacts"
-        
-        # Save each service content to a separate file
-        uploaded_files = []
-        
-        for service_type, content in service_contents.items():
-            if not content.strip():
-                continue
+            if use_chunking:
+                print(f"[CHUNKING] Input size ({estimated_tokens:,} tokens) exceeds limit. Using chunking.")
+                update_job_status(job_id, 'CHUNKING', f"Breaking content into chunks ({estimated_tokens:,} tokens)")
                 
-            # Determine file extension
-            if service_type == "CLOUDFORMATION":
-                file_extension = ".yaml"
-            elif service_type in ["IAM_ROLES", "DYNAMODB"]:
-                file_extension = ".json"
-            elif service_type == "README":
-                file_extension = ".md"
+                # Create chunks
+                chunks = create_chunks(full_prompt)
+                
+                if not chunks:
+                    error_message = "Failed to create chunks for processing"
+                    update_job_status(job_id, 'ERROR', error_message)
+                    return {'status': 'error', 'error': error_message}
+                
+                # Process chunks
+                update_job_status(job_id, 'PROCESSING_CHUNKS', f"Processing {len(chunks)} chunks")
+                service_contents = process_chunks(chunks)
+                
+                if not service_contents:
+                    error_message = "Failed to get results from any chunks"
+                    update_job_status(job_id, 'ERROR', error_message)
+                    return {'status': 'error', 'error': error_message}
+                    
+                analysis_result = "Chunked processing completed successfully"
             else:
-                file_extension = ".txt"
+                # Standard processing for smaller inputs
+                timeout_seconds = calculate_adaptive_timeout(prompt_length)
                 
-            service_filename = f"{service_type.lower()}{file_extension}"
-            service_key = f"{aws_artifacts_path}/{service_filename}"
+                print(f"[BEDROCK] Analyzing documentation with {timeout_seconds}s timeout")
+                analysis_result = call_llm_converse(full_prompt, wait=True, timeout_seconds=timeout_seconds)
+                
+                if analysis_result.startswith("Error:"):
+                    update_job_status(job_id, 'ERROR', analysis_result)
+                    return {'status': 'error', 'error': analysis_result}
+                
+                service_contents = parse_llm_response_by_service(analysis_result)
             
-            s3_client.put_object(
-                Bucket=bucket_name,
-                Key=service_key,
-                Body=content.encode('utf-8')
-            )
+            # Save raw result for non-chunked processing
+            if not use_chunking:
+                raw_result_key = f"{output_path}/raw_analysis_result.txt"
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=raw_result_key,
+                    Body=analysis_result.encode('utf-8')
+                )
             
-            uploaded_files.append({
-                "service_type": service_type,
-                "s3_location": f"s3://{bucket_name}/{service_key}",
-                "size_bytes": len(content.encode('utf-8'))
-            })
-        
-        # Update job status
-        status_message = f"Successfully analyzed and created {len(uploaded_files)} files"
-        if use_chunking:
-            status_message = f"Successfully analyzed using chunking and created {len(uploaded_files)} files"
+            # Create aws_artifacts subfolder
+            aws_artifacts_path = f"{output_path}/aws_artifacts"
             
-        update_job_status(job_id, 'COMPLETED', status_message)
-        
-        return {
-            'status': 'success',
-            'job_id': job_id,
-            'bucket_name': bucket_name,
-            'output_path': output_path,
-            'files': uploaded_files,
-            'chunked_processing': use_chunking
-        }
+            # Save each service content to a separate file
+            uploaded_files = []
+            
+            for service_type, content in service_contents.items():
+                if not content.strip():
+                    continue
+                    
+                # Determine file extension
+                if service_type == "CLOUDFORMATION":
+                    file_extension = ".yaml"
+                elif service_type in ["IAM_ROLES", "DYNAMODB"]:
+                    file_extension = ".json"
+                elif service_type == "README":
+                    file_extension = ".md"
+                else:
+                    file_extension = ".txt"
+                    
+                service_filename = f"{service_type.lower()}{file_extension}"
+                service_key = f"{aws_artifacts_path}/{service_filename}"
+                
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=service_key,
+                    Body=content.encode('utf-8')
+                )
+                
+                uploaded_files.append({
+                    "service_type": service_type,
+                    "s3_location": f"s3://{bucket_name}/{service_key}",
+                    "size_bytes": len(content.encode('utf-8'))
+                })
+            
+            # Update job status
+            status_message = f"Successfully analyzed and created {len(uploaded_files)} files"
+            if use_chunking:
+                status_message = f"Successfully analyzed using chunking and created {len(uploaded_files)} files"
+                
+            update_job_status(job_id, 'COMPLETED', status_message)
+            
+            return {
+                'status': 'success',
+                'job_id': job_id,
+                'bucket_name': bucket_name,
+                'output_path': output_path,
+                'files': uploaded_files,
+                'streaming_extraction': False,
+                'chunked_processing': use_chunking
+            }
         
     except Exception as e:
-        error_message = f"Error during analysis: {str(e)}"
+        error_message = f"Error during enhanced analysis: {str(e)}"
         print(f"[ERROR] {error_message}")
         print(f"[ERROR] Traceback:\n{traceback.format_exc()}")
         
