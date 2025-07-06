@@ -375,6 +375,7 @@ Resources:
                 "s3_location.$": "$.s3_location",
                 "perform_changeset_validation": true
               },
+              "ResultPath": "$.validation_result",
               "Retry": [
                 {
                   "ErrorEquals": ["States.TaskFailed", "States.Timeout", "ThrottlingException"],
@@ -396,7 +397,7 @@ Resources:
               "Type": "Choice",
               "Choices": [
                 {
-                  "Variable": "$.validation_status",
+                  "Variable": "$.validation_result.validation_status",
                   "StringEquals": "FAILED",
                   "Next": "HandleValidationFailure"
                 }
@@ -407,10 +408,10 @@ Resources:
               "Type": "Task",
               "Resource": "${CompletionLambda.Arn}",
               "Parameters": {
-                "job_id.$": "$.job_id",
+                "job_id.$": "$.validation_result.job_id",
                 "status": "VALIDATION_FAILED",
-                "error.$": "$.validation_errors",
-                "s3_location.$": "$.s3_location"
+                "error.$": "$.validation_result.validation_errors",
+                "s3_location.$": "$.validation_result.s3_location"
               },
               "End": true
             },
@@ -418,10 +419,12 @@ Resources:
               "Type": "Task",
               "Resource": "${CompletionLambda.Arn}",
               "Parameters": {
-                "job_id.$": "$.job_id",
+                "job_id.$": "$.validation_result.job_id",
                 "status": "VALIDATED",
                 "message": "Template validation successful",
-                "s3_location.$": "$.s3_location"
+                "s3_location.$": "$.validation_result.s3_location",
+                "zip_location.$": "$.zip_location",
+                "config_zip_location.$": "$.config_zip_location"
               },
               "ResultPath": "$.completion_result",
               "Retry": [
@@ -447,7 +450,8 @@ Resources:
               "Parameters": {
                 "job_id.$": "$.job_id",
                 "status": "ERROR",
-                "error.$": "$.error"
+                "error.$": "$.error",
+                "s3_location.$": "$.s3_location"
               },
               "End": true
             },
@@ -457,8 +461,7 @@ Resources:
               "Parameters": {
                 "job_id.$": "$.job_id",
                 "status": "VALIDATION_ERROR",
-                "error.$": "$.error",
-                "s3_location.$": "$.s3_location"
+                "error.$": "$.error"
               },
               "End": true
             }
