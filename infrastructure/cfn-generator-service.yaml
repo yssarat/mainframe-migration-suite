@@ -424,12 +424,6 @@ Resources:
                 "s3_location.$": "$.s3_location"
               },
               "ResultPath": "$.completion_result",
-              "Parameters": {
-                "job_id.$": "$.job_id",
-                "s3_location.$": "$.s3_location",
-                "zip_location.$": "$.zip_location",
-                "config_zip_location.$": "$.config_zip_location"
-              },
               "Retry": [
                 {
                   "ErrorEquals": ["States.TaskFailed", "States.Timeout"],
