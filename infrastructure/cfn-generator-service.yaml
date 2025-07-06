@@ -188,7 +188,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub CFNGenerator-Initial-${Environment}
-      Handler: initial-lambda/lambda_function.lambda_handler
+      Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !If 
@@ -222,7 +222,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub CFNGenerator-Status-${Environment}
-      Handler: status-lambda/lambda_function.lambda_handler
+      Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !If 
@@ -255,7 +255,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub CFNGenerator-Generator-${Environment}
-      Handler: generator/lambda_function.lambda_handler
+      Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !If 
@@ -283,7 +283,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub CFNGenerator-Completion-${Environment}
-      Handler: completion/lambda_function.lambda_handler
+      Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !If 
@@ -307,7 +307,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub CFNGenerator-Validation-${Environment}
-      Handler: validation-lambda/lambda_function.lambda_handler
+      Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !If 
