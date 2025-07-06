@@ -138,30 +138,8 @@ Resources:
 ## Overview
 This project implements a comprehensive AWS serverless solution to modernize mainframe batch processing systems. The solution replaces traditional mainframe components with cloud-native AWS services, providing improved scalability, reliability, and cost efficiency while maintaining functional compatibility with existing business processes.
 
-## Architecture
-The modernized architecture follows AWS Well-Architected Framework principles and implements an event-driven, serverless design:
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   S3 Input      │    │   Lambda        │    │   DynamoDB      │
-│   Bucket        │───▶│   Functions     │───▶│   Tables        │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │              ┌─────────────────┐              │
-         │              │  Step Functions │              │
-         └─────────────▶│   Workflow      │◀─────────────┘
-                        └─────────────────┘
-                                 │
-                        ┌─────────────────┐
-                        │   S3 Output     │
-                        │   Bucket        │
-                        └─────────────────┘
-                                 │
-                        ┌─────────────────┐
-                        │   SNS Topics    │
-                        │  & EventBridge  │
-                        └─────────────────┘
-```
+## Architecture Overview
+The modernized architecture follows AWS Well-Architected Framework principles and implements an event-driven, serverless design. For detailed architecture diagrams and component relationships, see [architecture.md](architecture.md).
 
 ### Key Components:
 - **S3 Input Bucket**: Receives mainframe data files with event triggers
@@ -221,6 +199,216 @@ The modernized architecture follows AWS Well-Architected Framework principles an
 - Circuit breaker patterns for external dependencies
 - Graceful degradation for non-critical failures
 - Automated recovery procedures where possible
+```
+
+## ARCHITECTURE
+### architecture.md
+```markdown
+# Mainframe Modernization Architecture
+
+## System Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           MAINFRAME MODERNIZATION PLATFORM                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
+│  │   MAINFRAME     │    │      AWS        │    │    BUSINESS     │             │
+│  │   DATA FILES    │───▶│   PROCESSING    │───▶│   APPLICATIONS  │             │
+│  │                 │    │    LAYER        │    │                 │             │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
+│           │                       │                       │                     │
+│           │                       │                       │                     │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
+│  │   S3 INPUT      │    │     LAMBDA      │    │    DYNAMODB     │             │
+│  │   BUCKET        │───▶│   FUNCTIONS     │───▶│    TABLES       │             │
+│  │                 │    │                 │    │                 │             │
+│  │ • File Upload   │    │ • Data Process  │    │ • Account Data  │             │
+│  │ • Event Trigger │    │ • Validation    │    │ • Audit Logs    │             │
+│  │ • Versioning    │    │ • Transform     │    │ • Job Status    │             │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
+│           │                       │                       │                     │
+│           │              ┌─────────────────┐              │                     │
+│           │              │  STEP FUNCTIONS │              │                     │
+│           └─────────────▶│   ORCHESTRATOR  │◀─────────────┘                     │
+│                          │                 │                                    │
+│                          │ • Workflow Mgmt │                                    │
+│                          │ • Error Handling│                                    │
+│                          │ • State Machine │                                    │
+│                          └─────────────────┘                                    │
+│                                   │                                             │
+│                          ┌─────────────────┐                                    │
+│                          │   S3 OUTPUT     │                                    │
+│                          │    BUCKET       │                                    │
+│                          │                 │                                    │
+│                          │ • Reports       │                                    │
+│                          │ • Processed Data│                                    │
+│                          │ • Audit Files   │                                    │
+│                          └─────────────────┘                                    │
+│                                   │                                             │
+│                          ┌─────────────────┐                                    │
+│                          │ NOTIFICATIONS   │                                    │
+│                          │                 │                                    │
+│                          │ • SNS Topics    │                                    │
+│                          │ • EventBridge   │                                    │
+│                          │ • CloudWatch    │                                    │
+│                          └─────────────────┘                                    │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Detailed Component Architecture
+
+### Data Ingestion Layer
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATA INGESTION LAYER                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Mainframe Files ──┐                                           │
+│                    │                                           │
+│  COBOL Programs ───┼──▶ S3 Input Bucket ──▶ Lambda Trigger    │
+│                    │         │                     │           │
+│  JCL Scripts ──────┘         │                     │           │
+│                              │                     ▼           │
+│                              │            ┌─────────────────┐  │
+│                              │            │  File Processor │  │
+│                              │            │     Lambda      │  │
+│                              │            │                 │  │
+│                              │            │ • Validation    │  │
+│                              │            │ • Parsing       │  │
+│                              │            │ • Metadata Ext │  │
+│                              │            └─────────────────┘  │
+│                              │                     │           │
+│                              ▼                     ▼           │
+│                    ┌─────────────────┐   ┌─────────────────┐  │
+│                    │   CloudWatch    │   │  Step Functions │  │
+│                    │     Logs        │   │   Workflow      │  │
+│                    └─────────────────┘   └─────────────────┘  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Processing Layer
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     PROCESSING LAYER                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐ │
+│  │  ACCOUNT DATA   │    │   VALIDATION    │    │   BUSINESS  │ │
+│  │   PROCESSOR     │    │    LAMBDA       │    │    LOGIC    │ │
+│  │                 │    │                 │    │   LAMBDA    │ │
+│  │ • Parse Records │    │ • Data Quality  │    │ • Transform │ │
+│  │ • Extract Fields│    │ • Schema Valid  │    │ • Calculate │ │
+│  │ • Format Data   │    │ • Error Check   │    │ • Aggregate │ │
+│  └─────────────────┘    └─────────────────┘    └─────────────┘ │
+│           │                       │                       │     │
+│           └───────────────────────┼───────────────────────┘     │
+│                                   │                             │
+│                          ┌─────────────────┐                    │
+│                          │  STEP FUNCTIONS │                    │
+│                          │   COORDINATOR   │                    │
+│                          │                 │                    │
+│                          │ • Parallel Exec │                    │
+│                          │ • Error Retry   │                    │
+│                          │ • State Mgmt    │                    │
+│                          │ • Flow Control  │                    │
+│                          └─────────────────┘                    │
+│                                   │                             │
+│                          ┌─────────────────┐                    │
+│                          │    DYNAMODB     │                    │
+│                          │   DATA STORE    │                    │
+│                          │                 │                    │
+│                          │ • Account Table │                    │
+│                          │ • Audit Table   │                    │
+│                          │ • Job Status    │                    │
+│                          └─────────────────┘                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Output and Notification Layer
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                OUTPUT & NOTIFICATION LAYER                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐ │
+│  │   REPORT GEN    │    │   FILE OUTPUT   │    │   ARCHIVE   │ │
+│  │    LAMBDA       │    │     LAMBDA      │    │   LAMBDA    │ │
+│  │                 │    │                 │    │             │ │
+│  │ • Format Report │    │ • Generate CSV  │    │ • Compress  │ │
+│  │ • Create Summary│    │ • Create JSON   │    │ • Store     │ │
+│  │ • Add Metadata  │    │ • Format Output │    │ • Lifecycle │ │
+│  └─────────────────┘    └─────────────────┘    └─────────────┘ │
+│           │                       │                       │     │
+│           └───────────────────────┼───────────────────────┘     │
+│                                   │                             │
+│                          ┌─────────────────┐                    │
+│                          │   S3 OUTPUT     │                    │
+│                          │    BUCKETS      │                    │
+│                          │                 │                    │
+│                          │ • Reports/      │                    │
+│                          │ • Processed/    │                    │
+│                          │ • Archive/      │                    │
+│                          │ • Audit/        │                    │
+│                          └─────────────────┘                    │
+│                                   │                             │
+│                          ┌─────────────────┐                    │
+│                          │  NOTIFICATIONS  │                    │
+│                          │                 │                    │
+│                          │ ┌─────────────┐ │                    │
+│                          │ │     SNS     │ │                    │
+│                          │ │   Topics    │ │                    │
+│                          │ └─────────────┘ │                    │
+│                          │ ┌─────────────┐ │                    │
+│                          │ │ EventBridge │ │                    │
+│                          │ │    Rules    │ │                    │
+│                          │ └─────────────┘ │                    │
+│                          │ ┌─────────────┐ │                    │
+│                          │ │ CloudWatch  │ │                    │
+│                          │ │   Alarms    │ │                    │
+│                          │ └─────────────┘ │                    │
+│                          └─────────────────┘                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Service Integration Flow
+
+### Data Processing Workflow
+1. **File Upload**: Mainframe files uploaded to S3 Input Bucket
+2. **Event Trigger**: S3 event triggers File Processor Lambda
+3. **Validation**: Lambda validates file format and structure
+4. **Workflow Start**: Step Functions workflow initiated
+5. **Parallel Processing**: Multiple Lambda functions process data in parallel
+6. **Data Storage**: Processed data stored in DynamoDB
+7. **Report Generation**: Output Lambda generates reports
+8. **File Output**: Reports saved to S3 Output Bucket
+9. **Notifications**: SNS/EventBridge send completion notifications
+
+### Error Handling Flow
+1. **Error Detection**: Lambda functions detect processing errors
+2. **Retry Logic**: Step Functions implements exponential backoff retry
+3. **Dead Letter Queue**: Failed messages sent to DLQ for analysis
+4. **Alert Generation**: CloudWatch alarms trigger notifications
+5. **Manual Intervention**: Operations team notified for manual resolution
+
+## Security Architecture
+
+### Data Protection
+- **Encryption at Rest**: All S3 buckets and DynamoDB tables encrypted with KMS
+- **Encryption in Transit**: All API calls use TLS 1.2+
+- **Access Control**: IAM roles with least privilege principles
+- **Network Security**: VPC endpoints for service communication
+
+### Monitoring and Compliance
+- **CloudTrail**: All API calls logged for audit
+- **CloudWatch**: Comprehensive monitoring and alerting
+- **X-Ray**: Distributed tracing for performance analysis
+- **Config**: Resource configuration compliance monitoring
 ```
 
 ## REASONING
@@ -583,7 +771,7 @@ Focus on mainframe modernization patterns like:
                 if new_section == 'README':
                     self.current_file = 'README.md'
                 elif new_section == 'REASONING':
-                    self.current_file = 'modernization_analysis.md'
+                    self.current_file = 'reasoning.md'  # Use consistent naming
                 elif new_section == 'ARCHITECTURE':
                     self.current_file = 'architecture.md'
                 
@@ -606,19 +794,6 @@ Focus on mainframe modernization patterns like:
         
         # Add content to current file or section
         if self.current_section:
-            # For documentation sections without explicit file headers, start collecting content
-            if self.current_section in self.documentation_sections and not self.current_file:
-                # Auto-create file if we haven't already
-                if self.current_section == 'README':
-                    self.current_file = 'README.md'
-                elif self.current_section == 'REASONING':
-                    self.current_file = 'modernization_analysis.md'
-                elif self.current_section == 'ARCHITECTURE':
-                    self.current_file = 'architecture.md'
-                
-                if self.current_file:
-                    print(f"[FILE] Auto-created file: {self.current_file} for content in section {self.current_section}")
-            
             # Add content if we have a current file
             if self.current_file:
                 self.current_content.append(line)
@@ -647,28 +822,25 @@ Focus on mainframe modernization patterns like:
         if not self.current_content:
             return False
         
-        # For documentation sections, save when we hit another section or significant content
+        # For documentation sections, only save when we hit another section
         if self.current_section in self.documentation_sections:
-            # Save when we detect a new section starting
-            if self.detect_section(line):
+            # Only save when we detect a new section starting (not the current section)
+            new_section = self.detect_section(line)
+            if new_section and new_section != self.current_section:
                 return True
-            
-            # Save documentation files when they have substantial content (more than 20 lines)
-            if len(self.current_content) > 20:
-                # Look for natural break points in documentation
-                if line.strip() == '' and len(self.current_content) > 50:
-                    return True
+            # Don't save documentation files based on length - accumulate all content
+            return False
         
-        # Check for code block endings
+        # Check for code block endings for technical files
         if line == '```' and len(self.current_content) > 10:
             return True
         
-        # Check for next file/section starting
+        # Check for next file/section starting for technical files
         if (self.detect_file(line) or self.detect_section(line)) and len(self.current_content) > 5:
             return True
         
-        # For large files, save periodically
-        if len(self.current_content) > 500:
+        # For very large technical files, save periodically to avoid memory issues
+        if len(self.current_content) > 1000:
             return True
         
         return False
