@@ -2,7 +2,7 @@
 
 # Deploy script for the entire Mainframe Modernization Platform
 # This script deploys all services and infrastructure components
-# FIXED VERSION - Resolves "No pre-built Lambda packages in the dist directory" error
+# UPDATED VERSION with fixes for S3 buckets and template packaging
 
 set -e
 
@@ -116,7 +116,7 @@ if [[ -n "$PROFILE" ]]; then
 fi
 
 # Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --profile "${PROFILE:-}")
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 print_status "Deploying to AWS Account: $ACCOUNT_ID in region: $REGION"
 
 # Change to script directory
@@ -131,22 +131,22 @@ print_status "Stack Name: $PLATFORM_STACK_NAME"
 # Function to safely delete S3 bucket and its contents
 delete_s3_bucket() {
     local bucket_name="$1"
-    if aws s3 ls "s3://${bucket_name}" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+    if aws s3 ls "s3://${bucket_name}" >/dev/null 2>&1; then
         print_status "Deleting existing S3 bucket and contents: ${bucket_name}"
         # Delete all objects and versions first
-        aws s3 rm "s3://${bucket_name}" --recursive --profile "${PROFILE:-}" >/dev/null 2>&1 || true
+        aws s3 rm "s3://${bucket_name}" --recursive >/dev/null 2>&1 || true
         # Delete any versioned objects
         aws s3api delete-objects --bucket "${bucket_name}" \
             --delete "$(aws s3api list-object-versions --bucket "${bucket_name}" \
             --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
-            --output json --profile "${PROFILE:-}")" --profile "${PROFILE:-}" >/dev/null 2>&1 || true
+            --output json)" >/dev/null 2>&1 || true
         # Delete any delete markers
         aws s3api delete-objects --bucket "${bucket_name}" \
             --delete "$(aws s3api list-object-versions --bucket "${bucket_name}" \
             --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
-            --output json --profile "${PROFILE:-}")" --profile "${PROFILE:-}" >/dev/null 2>&1 || true
+            --output json)" >/dev/null 2>&1 || true
         # Finally delete the bucket
-        aws s3 rb "s3://${bucket_name}" --profile "${PROFILE:-}" >/dev/null 2>&1 || true
+        aws s3 rb "s3://${bucket_name}" >/dev/null 2>&1 || true
         print_success "Deleted S3 bucket: ${bucket_name}"
     fi
 }
@@ -161,9 +161,9 @@ if [[ "$CLEAN_AGENTS" == "true" ]]; then
         local agent_alias_id="$2"
         local agent_name="$3"
         
-        if aws bedrock-agent get-agent-alias --agent-id "$agent_id" --agent-alias-id "$agent_alias_id" --region "$REGION" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+        if aws bedrock-agent get-agent-alias --agent-id "$agent_id" --agent-alias-id "$agent_alias_id" --region "$REGION" >/dev/null 2>&1; then
             print_status "Deleting existing agent alias for $agent_name (Agent ID: $agent_id, Alias ID: $agent_alias_id)"
-            aws bedrock-agent delete-agent-alias --agent-id "$agent_id" --agent-alias-id "$agent_alias_id" --region "$REGION" --profile "${PROFILE:-}" >/dev/null 2>&1 || {
+            aws bedrock-agent delete-agent-alias --agent-id "$agent_id" --agent-alias-id "$agent_alias_id" --region "$REGION" >/dev/null 2>&1 || {
                 print_warning "Failed to delete agent alias for $agent_name, continuing..."
             }
             print_success "Deleted agent alias for $agent_name"
@@ -174,14 +174,14 @@ if [[ "$CLEAN_AGENTS" == "true" ]]; then
     
     # Get list of existing agents and clean up their aliases
     print_status "Scanning for existing Bedrock agents..."
-    EXISTING_AGENTS=$(aws bedrock-agent list-agents --region "$REGION" --profile "${PROFILE:-}" --query "agentSummaries[?contains(agentName, 'cfn-generator') || contains(agentName, 'MainframeAnalyzer') || contains(agentName, 'mainframe-analyzer')].{agentId:agentId,agentName:agentName}" --output json 2>/dev/null || echo "[]")
+    EXISTING_AGENTS=$(aws bedrock-agent list-agents --region "$REGION" --query "agentSummaries[?contains(agentName, 'cfn-generator') || contains(agentName, 'MainframeAnalyzer') || contains(agentName, 'mainframe-analyzer')].{agentId:agentId,agentName:agentName}" --output json 2>/dev/null || echo "[]")
     
     if [[ "$EXISTING_AGENTS" != "[]" ]]; then
         echo "$EXISTING_AGENTS" | jq -r '.[] | "\(.agentId) \(.agentName)"' | while read -r agent_id agent_name; do
             print_status "Checking agent: $agent_name ($agent_id)"
             
             # Get aliases for this agent
-            ALIASES=$(aws bedrock-agent list-agent-aliases --agent-id "$agent_id" --region "$REGION" --profile "${PROFILE:-}" --query "agentAliasSummaries[].agentAliasId" --output text 2>/dev/null || echo "")
+            ALIASES=$(aws bedrock-agent list-agent-aliases --agent-id "$agent_id" --region "$REGION" --query "agentAliasSummaries[].agentAliasId" --output text 2>/dev/null || echo "")
             
             if [[ -n "$ALIASES" ]]; then
                 for alias_id in $ALIASES; do
@@ -224,42 +224,42 @@ if [[ "$CLEAN_BUCKETS" == "true" ]]; then
     print_status "Creating fresh S3 buckets..."
     
     print_status "Creating S3 bucket for CloudFormation templates: ${TEMPLATE_BUCKET}"
-    aws s3 mb "s3://${TEMPLATE_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+    aws s3 mb "s3://${TEMPLATE_BUCKET}" --region "$REGION"
     
     print_status "Creating S3 bucket for CFN Generator Lambda code: ${CFN_LAMBDA_BUCKET}"
-    aws s3 mb "s3://${CFN_LAMBDA_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+    aws s3 mb "s3://${CFN_LAMBDA_BUCKET}" --region "$REGION"
     
     print_status "Creating S3 bucket for Mainframe Analyzer Lambda code: ${ANALYZER_LAMBDA_BUCKET}"
-    aws s3 mb "s3://${ANALYZER_LAMBDA_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+    aws s3 mb "s3://${ANALYZER_LAMBDA_BUCKET}" --region "$REGION"
     
     print_status "Creating S3 bucket for mainframe transform: ${TRANSFORM_BUCKET}"
-    aws s3 mb "s3://${TRANSFORM_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+    aws s3 mb "s3://${TRANSFORM_BUCKET}" --region "$REGION"
 else
     # Create buckets only if they don't exist (original behavior)
-    if ! aws s3 ls "s3://${TEMPLATE_BUCKET}" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+    if ! aws s3 ls "s3://${TEMPLATE_BUCKET}" >/dev/null 2>&1; then
         print_status "Creating S3 bucket for CloudFormation templates: ${TEMPLATE_BUCKET}"
-        aws s3 mb "s3://${TEMPLATE_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+        aws s3 mb "s3://${TEMPLATE_BUCKET}" --region "$REGION"
     else
         print_status "S3 bucket for templates already exists: ${TEMPLATE_BUCKET}"
     fi
     
-    if ! aws s3 ls "s3://${CFN_LAMBDA_BUCKET}" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+    if ! aws s3 ls "s3://${CFN_LAMBDA_BUCKET}" >/dev/null 2>&1; then
         print_status "Creating S3 bucket for CFN Generator Lambda code: ${CFN_LAMBDA_BUCKET}"
-        aws s3 mb "s3://${CFN_LAMBDA_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+        aws s3 mb "s3://${CFN_LAMBDA_BUCKET}" --region "$REGION"
     else
         print_status "S3 bucket for CFN Generator Lambda code already exists: ${CFN_LAMBDA_BUCKET}"
     fi
     
-    if ! aws s3 ls "s3://${ANALYZER_LAMBDA_BUCKET}" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+    if ! aws s3 ls "s3://${ANALYZER_LAMBDA_BUCKET}" >/dev/null 2>&1; then
         print_status "Creating S3 bucket for Mainframe Analyzer Lambda code: ${ANALYZER_LAMBDA_BUCKET}"
-        aws s3 mb "s3://${ANALYZER_LAMBDA_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+        aws s3 mb "s3://${ANALYZER_LAMBDA_BUCKET}" --region "$REGION"
     else
         print_status "S3 bucket for Mainframe Analyzer Lambda code already exists: ${ANALYZER_LAMBDA_BUCKET}"
     fi
     
-    if ! aws s3 ls "s3://${TRANSFORM_BUCKET}" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+    if ! aws s3 ls "s3://${TRANSFORM_BUCKET}" >/dev/null 2>&1; then
         print_status "Creating S3 bucket for mainframe transform: ${TRANSFORM_BUCKET}"
-        aws s3 mb "s3://${TRANSFORM_BUCKET}" --region "$REGION" --profile "${PROFILE:-}"
+        aws s3 mb "s3://${TRANSFORM_BUCKET}" --region "$REGION"
     else
         print_status "S3 bucket for mainframe transform already exists: ${TRANSFORM_BUCKET}"
     fi
@@ -273,8 +273,7 @@ aws cloudformation package \
     --template-file infrastructure/main.yaml \
     --s3-bucket "${TEMPLATE_BUCKET}" \
     --output-template-file infrastructure/main-packaged.yaml \
-    --region "$REGION" \
-    --profile "${PROFILE:-}"
+    --region "$REGION"
 
 if [[ $? -ne 0 ]]; then
     print_error "Failed to package CloudFormation templates"
@@ -287,7 +286,7 @@ print_success "CloudFormation templates packaged successfully"
 print_status "Step 2a: Creating PyPDF Lambda Layer..."
 
 # Check if layer already exists in S3
-if aws s3 ls "s3://${ANALYZER_LAMBDA_BUCKET}/layer/pypdfdocxlayer.zip" --profile "${PROFILE:-}" >/dev/null 2>&1; then
+if aws s3 ls "s3://${ANALYZER_LAMBDA_BUCKET}/layer/pypdfdocxlayer.zip" >/dev/null 2>&1; then
     print_status "PyPDF layer already exists in S3, skipping creation..."
 else
     print_status "Creating PyPDF layer..."
@@ -308,7 +307,11 @@ else
     zip -r pypdf_layer.zip python/ >/dev/null 2>&1
     
     print_status "Uploading PyPDF layer to S3..."
-    aws s3 cp pypdf_layer.zip "s3://${ANALYZER_LAMBDA_BUCKET}/layer/pypdfdocxlayer.zip" --region "$REGION" --profile "${PROFILE:-}"
+    if [[ -n "$PROFILE" ]]; then
+        aws s3 cp pypdf_layer.zip "s3://${ANALYZER_LAMBDA_BUCKET}/layer/pypdfdocxlayer.zip" --region "$REGION" --profile "$PROFILE"
+    else
+        aws s3 cp pypdf_layer.zip "s3://${ANALYZER_LAMBDA_BUCKET}/layer/pypdfdocxlayer.zip" --region "$REGION"
+    fi
     
     # Cleanup
     deactivate
@@ -321,100 +324,97 @@ fi
 # Step 2b: Package Lambda functions
 print_status "Step 2b: Preparing Lambda deployment packages..."
 
-# FIXED: Package CFN Generator Lambda functions with proper directory context
+# Package CFN Generator Lambda functions
 if [[ -d "services/cfn-generator/src" ]]; then
-    print_status "Processing CFN Generator Lambda functions..."
-    
-    # Check if pre-built packages exist in the service's dist directory
-    if [[ -d "services/cfn-generator/dist" ]] && [[ -n "$(ls -A services/cfn-generator/dist/*.zip 2>/dev/null)" ]]; then
-        print_status "Found pre-built CFN Generator Lambda packages, uploading to S3..."
-        aws s3 cp services/cfn-generator/dist/ "s3://${CFN_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" --profile "${PROFILE:-}" || {
-            print_error "Failed to upload pre-built CFN Generator Lambda packages"
-            exit 1
+    cd services/cfn-generator
+    if [[ -x "scripts/deploy.sh" ]]; then
+        print_status "Packaging CFN Generator Lambda functions..."
+        # Try to run the deploy script in package-only mode, ignore errors if option doesn't exist
+        ./scripts/deploy.sh --package-only --env "$ENVIRONMENT" --region "$REGION" 2>/dev/null || {
+            print_warning "CFN Generator deploy script doesn't support --package-only, packaging manually..."
+            
+            # Manual packaging for CFN Generator Lambda functions
+            mkdir -p dist
+            cd src
+            for dir in */; do
+                if [[ -f "${dir}lambda_function.py" ]]; then
+                    print_status "Packaging ${dir%/} Lambda function..."
+                    cd "$dir"
+                    zip -r "../../dist/${dir%/}.zip" . >/dev/null 2>&1
+                    cd ..
+                fi
+            done
+            cd ..
+            
+            # Upload to S3 with correct naming
+            print_status "Uploading CFN Generator Lambda packages to S3..."
+            aws s3 cp dist/ "s3://${CFN_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" || {
+                print_warning "Failed to upload CFN Generator Lambda packages"
+            }
+            
+            # Fix naming for packages that need -lambda suffix
+            for package in completion generator; do
+                if aws s3 ls "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" >/dev/null 2>&1; then
+                    aws s3 cp "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}-lambda.zip" --region "$REGION" || true
+                fi
+            done
         }
-        
-        # Fix naming for packages that need -lambda suffix
-        for package in completion generator; do
-            if aws s3 ls "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" --profile "${PROFILE:-}" >/dev/null 2>&1; then
-                aws s3 cp "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}-lambda.zip" --region "$REGION" --profile "${PROFILE:-}" || true
-            fi
-        done
-        print_success "CFN Generator Lambda packages uploaded successfully"
     else
-        print_status "No pre-built CFN Generator packages found, creating them manually..."
-        
-        # Manual packaging for CFN Generator Lambda functions
-        cd services/cfn-generator
-        mkdir -p dist
-        cd src
-        for dir in */; do
-            if [[ -f "${dir}lambda_function.py" ]]; then
-                print_status "Packaging ${dir%/} Lambda function..."
-                cd "$dir"
-                zip -r "../../dist/${dir%/}.zip" . >/dev/null 2>&1
-                cd ..
-            fi
-        done
-        cd ..
-        
-        # Upload to S3 with correct naming
-        print_status "Uploading CFN Generator Lambda packages to S3..."
-        aws s3 cp dist/ "s3://${CFN_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" --profile "${PROFILE:-}" || {
-            print_error "Failed to upload CFN Generator Lambda packages"
+        print_warning "CFN Generator deploy script not found, checking for pre-built packages..."
+        # Check if pre-built Lambda packages exist in dist directory
+        if [[ -d "dist" ]] && [[ -n "$(ls -A dist/*.zip 2>/dev/null)" ]]; then
+            print_status "Found pre-built Lambda packages, uploading to S3..."
+            aws s3 cp dist/ "s3://${CFN_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" || {
+                print_error "Failed to upload pre-built CFN Generator Lambda packages"
+                exit 1
+            }
+            
+            # Fix naming for packages that need -lambda suffix
+            for package in completion generator; do
+                if aws s3 ls "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" >/dev/null 2>&1; then
+                    aws s3 cp "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}-lambda.zip" --region "$REGION" || true
+                fi
+            done
+            print_success "CFN Generator Lambda packages uploaded successfully"
+        else
+            print_error "No pre-built Lambda packages found in dist directory"
             exit 1
-        }
-        
-        # Fix naming for packages that need -lambda suffix
-        for package in completion generator; do
-            if aws s3 ls "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" --profile "${PROFILE:-}" >/dev/null 2>&1; then
-                aws s3 cp "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}.zip" "s3://${CFN_LAMBDA_BUCKET}/lambda/${package}-lambda.zip" --region "$REGION" --profile "${PROFILE:-}" || true
-            fi
-        done
-        
-        cd ../..
-        print_success "CFN Generator Lambda packages created and uploaded successfully"
+        fi
     fi
+    cd ../..
 fi
 
-# FIXED: Package Mainframe Analyzer Lambda functions with proper directory context
+# Package Mainframe Analyzer Lambda functions  
 if [[ -d "services/mainframe-analyzer/src" ]]; then
-    print_status "Processing Mainframe Analyzer Lambda functions..."
-    
-    # Check if pre-built packages exist in the service's dist directory
-    if [[ -d "services/mainframe-analyzer/dist" ]] && [[ -n "$(ls -A services/mainframe-analyzer/dist/*.zip 2>/dev/null)" ]]; then
-        print_status "Found pre-built Mainframe Analyzer Lambda packages, uploading to S3..."
-        aws s3 cp services/mainframe-analyzer/dist/ "s3://${ANALYZER_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" --profile "${PROFILE:-}" || {
-            print_error "Failed to upload pre-built Mainframe Analyzer Lambda packages"
-            exit 1
+    cd services/mainframe-analyzer
+    if [[ -x "scripts/3.package-lambdas.sh" ]]; then
+        print_status "Packaging Mainframe Analyzer Lambda functions..."
+        ./scripts/3.package-lambdas.sh --region "$REGION" --env "$ENVIRONMENT" || {
+            print_warning "Failed to package Mainframe Analyzer Lambda functions, continuing..."
         }
-        print_success "Mainframe Analyzer Lambda packages uploaded successfully"
+        
+        # Copy Lambda packages to the correct bucket expected by CloudFormation
+        print_status "Copying Lambda packages to CloudFormation expected bucket..."
+        TRANSFORM_BUCKET="mainframe-transform-${ENVIRONMENT}-${ACCOUNT_ID}"
+        aws s3 cp "s3://${TRANSFORM_BUCKET}/lambda/" "s3://${ANALYZER_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" || {
+            print_warning "Failed to copy Lambda packages, deployment may fail..."
+        }
     else
-        print_status "No pre-built Mainframe Analyzer packages found, creating them manually..."
-        
-        # Manual packaging for Mainframe Analyzer Lambda functions
-        cd services/mainframe-analyzer
-        mkdir -p dist
-        cd src
-        for dir in */; do
-            if [[ -f "${dir}lambda_function.py" ]]; then
-                print_status "Packaging ${dir%/} Lambda function..."
-                cd "$dir"
-                zip -r "../../dist/${dir%/}.zip" . >/dev/null 2>&1
-                cd ..
-            fi
-        done
-        cd ..
-        
-        # Upload to S3
-        print_status "Uploading Mainframe Analyzer Lambda packages to S3..."
-        aws s3 cp dist/ "s3://${ANALYZER_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" --profile "${PROFILE:-}" || {
-            print_error "Failed to upload Mainframe Analyzer Lambda packages"
+        print_warning "Mainframe Analyzer package script not found, checking for pre-built packages..."
+        # Check if pre-built Lambda packages exist in dist directory
+        if [[ -d "dist" ]] && [[ -n "$(ls -A dist/*.zip 2>/dev/null)" ]]; then
+            print_status "Found pre-built Lambda packages, uploading to S3..."
+            aws s3 cp dist/ "s3://${ANALYZER_LAMBDA_BUCKET}/lambda/" --recursive --region "$REGION" || {
+                print_error "Failed to upload pre-built Mainframe Analyzer Lambda packages"
+                exit 1
+            }
+            print_success "Mainframe Analyzer Lambda packages uploaded successfully"
+        else
+            print_error "No pre-built Lambda packages found in dist directory"
             exit 1
-        }
-        
-        cd ../..
-        print_success "Mainframe Analyzer Lambda packages created and uploaded successfully"
+        fi
     fi
+    cd ../..
 fi
 
 # Step 3: Deploy the master template with enhanced monitoring
@@ -428,7 +428,6 @@ check_stack_status() {
     aws cloudformation describe-stacks \
         --stack-name "$stack_name" \
         --region "$REGION" \
-        --profile "${PROFILE:-}" \
         --query "Stacks[0].StackStatus" \
         --output text 2>/dev/null || echo "STACK_NOT_FOUND"
 }
@@ -437,10 +436,10 @@ check_stack_status() {
 CURRENT_STATUS=$(check_stack_status "$STACK_NAME")
 if [[ "$CURRENT_STATUS" == "ROLLBACK_COMPLETE" || "$CURRENT_STATUS" == "CREATE_FAILED" || "$CURRENT_STATUS" == "UPDATE_ROLLBACK_COMPLETE" ]]; then
     print_warning "Stack $STACK_NAME is in $CURRENT_STATUS state. Deleting before redeployment..."
-    aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$REGION" --profile "${PROFILE:-}"
+    aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$REGION"
     
     print_status "Waiting for stack deletion to complete..."
-    aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME" --region "$REGION" --profile "${PROFILE:-}"
+    aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME" --region "$REGION"
     print_success "Stack deleted successfully"
 fi
 
@@ -451,7 +450,6 @@ get_stack_events() {
     aws cloudformation describe-stack-events \
         --stack-name "$stack_name" \
         --region "$REGION" \
-        --profile "${PROFILE:-}" \
         --max-items "$max_items" \
         --query "StackEvents[*].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
         --output table 2>/dev/null || echo "No events found"
@@ -463,7 +461,6 @@ get_failed_resources() {
     aws cloudformation describe-stack-events \
         --stack-name "$stack_name" \
         --region "$REGION" \
-        --profile "${PROFILE:-}" \
         --query "StackEvents[?contains(ResourceStatus, 'FAILED')].[LogicalResourceId,ResourceStatus,ResourceStatusReason,Timestamp]" \
         --output table 2>/dev/null
 }
@@ -481,7 +478,6 @@ aws cloudformation deploy \
         LambdaCodeBucket="" \
     --capabilities CAPABILITY_NAMED_IAM \
     --region "$REGION" \
-    --profile "${PROFILE:-}" \
     --no-fail-on-empty-changeset &
 
 DEPLOY_PID=$!
@@ -548,7 +544,7 @@ else
             
             print_error ""
             print_error "To get more details, run:"
-            print_error "aws cloudformation describe-stack-events --stack-name $STACK_NAME --region $REGION --profile ${PROFILE:-}"
+            print_error "aws cloudformation describe-stack-events --stack-name $STACK_NAME --region $REGION"
             ;;
         *)
             print_error "Unexpected stack status. Check the AWS Console for more details."
@@ -565,14 +561,12 @@ print_status "Step 4: Retrieving deployment information..."
 SUPERVISOR_AGENT_ID=$(aws cloudformation describe-stacks \
     --stack-name "$STACK_NAME" \
     --region "$REGION" \
-    --profile "${PROFILE:-}" \
     --query "Stacks[0].Outputs[?OutputKey=='SupervisorAgentId'].OutputValue" \
     --output text 2>/dev/null || echo "Not found")
 
 SUPERVISOR_AGENT_ALIAS_ID=$(aws cloudformation describe-stacks \
     --stack-name "$STACK_NAME" \
     --region "$REGION" \
-    --profile "${PROFILE:-}" \
     --query "Stacks[0].Outputs[?OutputKey=='SupervisorAgentAliasId'].OutputValue" \
     --output text 2>/dev/null || echo "Not found")
 
@@ -617,9 +611,15 @@ print_status "Uploading sample mainframe documentation files for testing..."
 
 if [[ -d "tests/mainframe-docs" ]]; then
     # Upload sample files to the transform bucket for immediate testing
-    aws s3 cp tests/mainframe-docs/ "s3://${TRANSFORM_BUCKET}/sample-docs/" --recursive --region "$REGION" --profile "${PROFILE:-}" || {
-        print_warning "Failed to upload sample documentation files"
-    }
+    if [[ -n "$PROFILE" ]]; then
+        aws s3 cp tests/mainframe-docs/ "s3://${TRANSFORM_BUCKET}/sample-docs/" --recursive --region "$REGION" --profile "$PROFILE" || {
+            print_warning "Failed to upload sample documentation files"
+        }
+    else
+        aws s3 cp tests/mainframe-docs/ "s3://${TRANSFORM_BUCKET}/sample-docs/" --recursive --region "$REGION" || {
+            print_warning "Failed to upload sample documentation files"
+        }
+    fi
     print_success "Sample mainframe documentation uploaded to: s3://${TRANSFORM_BUCKET}/sample-docs/"
 else
     print_warning "No sample documentation found in tests/mainframe-docs/ directory"
@@ -632,7 +632,6 @@ print_status "Running basic health checks..."
 STACK_STATUS=$(aws cloudformation describe-stacks \
     --stack-name "$STACK_NAME" \
     --region "$REGION" \
-    --profile "${PROFILE:-}" \
     --query "Stacks[0].StackStatus" \
     --output text 2>/dev/null || echo "UNKNOWN")
 
