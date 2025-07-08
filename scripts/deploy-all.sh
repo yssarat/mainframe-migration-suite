@@ -642,4 +642,16 @@ else
     print_warning "Stack status: $STACK_STATUS"
 fi
 
+# Clean up dist folders to ensure fresh builds on next deployment
+print_status "Cleaning up deployment packages to ensure fresh builds next time..."
+if [ -d "services/cfn-generator/dist" ]; then
+    rm -rf services/cfn-generator/dist
+    print_success "Cleaned up CFN Generator dist folder"
+fi
+
+if [ -d "services/mainframe-analyzer/dist" ]; then
+    rm -rf services/mainframe-analyzer/dist
+    print_success "Cleaned up Mainframe Analyzer dist folder"
+fi
+
 print_success "Deployment script completed!"
