@@ -51,20 +51,6 @@ def update_job_status(job_id, status, message=None):
         logger.error(f"Error updating job status: {str(e)}")
         raise
 
-def get_parameter(param_name):
-    """Get a parameter from Parameter Store"""
-    try:
-        logger.info(f"Getting parameter: {param_name}")
-        ssm = boto3.client('ssm')
-        response = ssm.get_parameter(
-            Name=param_name,
-            WithDecryption=True
-        )
-        return response['Parameter']['Value']
-    except Exception as e:
-        logger.error(f"Error getting parameter {param_name}: {str(e)}")
-        return None
-
 def lambda_handler(event, context):
     """
     Aggregate the processed file contents for analysis
@@ -78,33 +64,10 @@ def lambda_handler(event, context):
         output_path = event.get('output_path', 'output')
         file_results = event.get('file_results', [])
         
-        # Get configuration from environment variables or Parameter Store
-        param_store_path = os.environ.get('PARAMETER_STORE_PREFIX', '/mainframe-modernization/documentation-agent/updated-prompt')
+        # Get configuration from environment variables
         max_combined_chars = int(os.environ.get('MAX_COMBINED_CHARS', 100000))
         
-        logger.info(f"Using Parameter Store path: {param_store_path}")
         logger.info(f"Using max_combined_chars: {max_combined_chars}")
-        
-        # Get the prompt template from Parameter Store
-        prompt_template = get_parameter(param_store_path)
-        
-        if not prompt_template:
-            logger.warning("Could not retrieve prompt template from Parameter Store, using default")
-            prompt_template = """
-            You are an expert mainframe documentation analyzer. Please analyze the following mainframe documentation and provide:
-            
-            1. A high-level overview of the system described
-            2. Key components and their relationships
-            3. Data structures and their fields
-            4. Business rules and logic
-            5. Potential modernization challenges
-            6. Recommendations for modernization approach
-            
-            Please format your response in markdown with appropriate sections and code blocks.
-            
-            DOCUMENTATION:
-            """
-        
         logger.info(f"Processing job_id={job_id}, bucket={bucket_name}, output_path={output_path}")
         logger.info(f"Received {len(file_results)} file results")
         
@@ -125,10 +88,9 @@ def lambda_handler(event, context):
                 'job_id': job_id  # Include job_id in the error response
             }
         
-        # Combine the processed file contents
-        print(prompt_template)
+        # Combine the processed file contents (no prompt prefix)
         s3 = boto3.client('s3')
-        combined_text = prompt_template + "\n\n"  # Start with the prompt template
+        combined_text = ""  # Start empty, no prompt prefix
         file_count = 0
         processed_files = []
         error_count = 0
@@ -149,17 +111,18 @@ def lambda_handler(event, context):
                 if len(combined_text) + len(file_content) > max_combined_chars:
                     logger.warning(f"Adding file would exceed max_combined_chars ({max_combined_chars})")
                     # If we already have some content, stop adding more
-                    if combined_text != prompt_template + "\n\n":
+                    if combined_text:
                         logger.info("Already have content, stopping here")
                         break
                     # If this is the first file and it's too large, truncate it
-                    logger.info(f"Truncating first file from {len(file_content)} to {max_combined_chars - len(combined_text)} chars")
-                    file_content = file_content[:max_combined_chars - len(combined_text)]
+                    logger.info(f"Truncating first file from {len(file_content)} to {max_combined_chars} chars")
+                    file_content = file_content[:max_combined_chars]
                 
-                # Add file content to combined text
+                # Add file content with clear separators
                 file_name = result.get('file_name', file_key.split('/')[-1])
-                combined_text += f"\n\n--- FILE: {file_name} ---\n\n"
+                combined_text += f"\n\n=== FILE: {file_name} ===\n"
                 combined_text += file_content
+                combined_text += f"\n=== END FILE: {file_name} ===\n\n"
                 file_count += 1
                 processed_files.append(file_name)
                 logger.info(f"Added file {file_name} to combined text (total files: {file_count})")
@@ -169,8 +132,8 @@ def lambda_handler(event, context):
                 logger.error(f"Error processing file {result.get('file_key')}: {str(e)}")
                 continue
         
-        # If no content was aggregated beyond the prompt template, return error
-        if combined_text == prompt_template + "\n\n":
+        # If no content was aggregated, return error
+        if not combined_text.strip():
             error_msg = 'Failed to aggregate any file content'
             logger.error(error_msg)
             update_job_status(job_id, 'ERROR', error_msg)
@@ -180,12 +143,12 @@ def lambda_handler(event, context):
                 'job_id': job_id
             }
         
-        # Save the combined content to S3
-        full_prompt_key = f"{output_path}/{job_id}/full_prompt.txt"
-        logger.info(f"Saving combined content to S3: bucket={bucket_name}, key={full_prompt_key}")
+        # Save the combined content to S3 (raw extracted text only)
+        combined_content_key = f"{output_path}/{job_id}/combined_content.txt"
+        logger.info(f"Saving combined content to S3: bucket={bucket_name}, key={combined_content_key}")
         s3.put_object(
             Bucket=bucket_name,
-            Key=full_prompt_key,
+            Key=combined_content_key,
             Body=combined_text.encode('utf-8'),
             ContentType='text/plain'
         )
@@ -202,7 +165,7 @@ def lambda_handler(event, context):
             'status': 'success',
             'job_id': job_id,
             'bucket_name': bucket_name,
-            'full_prompt_key': full_prompt_key,
+            'full_prompt_key': combined_content_key,  # Changed from combined_content_key to full_prompt_key
             'output_path': output_path,
             'file_count': file_count,
             'char_count': len(combined_text),

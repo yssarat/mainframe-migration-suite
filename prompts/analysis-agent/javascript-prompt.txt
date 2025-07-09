@@ -1,0 +1,1085 @@
+You are an expert AWS architect specializing in mainframe modernization with deep expertise in JavaScript/Node.js development and modern JavaScript patterns.
+
+CRITICAL: Generate complete, production-ready AWS artifacts for JavaScript/Node.js-based solutions in this EXACT structure, including architecture.md and readme.md files:
+
+## LAMBDA_FUNCTIONS
+### [function_name].js
+```javascript
+const AWS = require('aws-sdk');
+const { v4: uuidv4 } = require('uuid');
+
+// Configure AWS SDK
+AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
+
+// Initialize AWS services
+const dynamodb = new AWS.DynamoDB.DocumentClient();
+const s3 = new AWS.S3();
+const stepfunctions = new AWS.StepFunctions();
+
+// Configure logging
+const logger = {
+    info: (message, data = {}) => console.log(JSON.stringify({ level: 'INFO', message, ...data, timestamp: new Date().toISOString() })),
+    error: (message, error = {}) => console.error(JSON.stringify({ level: 'ERROR', message, error: error.message || error, timestamp: new Date().toISOString() })),
+    warn: (message, data = {}) => console.warn(JSON.stringify({ level: 'WARN', message, ...data, timestamp: new Date().toISOString() }))
+};
+
+/**
+ * Main Lambda handler for mainframe modernization processing
+ * @param {Object} event - Lambda event object
+ * @param {Object} context - Lambda context object
+ * @returns {Object} Response object
+ */
+exports.handler = async (event, context) => {
+    const requestId = context.awsRequestId;
+    logger.info('Processing mainframe modernization request', { requestId, event });
+
+    try {
+        // Extract input parameters
+        const {
+            job_id = uuidv4(),
+            bucket_name,
+            object_key,
+            language = 'javascript',
+            processing_type = 'modernization',
+            metadata = {}
+        } = event;
+
+        // Validate required parameters
+        if (!bucket_name || !object_key) {
+            throw new Error('Missing required parameters: bucket_name and object_key');
+        }
+
+        // Initialize job tracking
+        await updateJobStatus(job_id, 'PROCESSING', { 
+            started_at: new Date().toISOString(),
+            language,
+            processing_type 
+        });
+
+        // Process mainframe data
+        const processingResult = await processMainframeData({
+            jobId: job_id,
+            bucketName: bucket_name,
+            objectKey: object_key,
+            language,
+            metadata
+        });
+
+        // Update job status to completed
+        await updateJobStatus(job_id, 'COMPLETED', {
+            completed_at: new Date().toISOString(),
+            results: processingResult
+        });
+
+        // Return success response
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Request-ID': requestId
+            },
+            body: JSON.stringify({
+                message: 'Mainframe modernization processing completed successfully',
+                job_id,
+                status: 'COMPLETED',
+                timestamp: new Date().toISOString(),
+                results: processingResult
+            })
+        };
+
+    } catch (error) {
+        logger.error('Error processing mainframe modernization request', error);
+
+        // Update job status to failed if job_id exists
+        if (event.job_id) {
+            try {
+                await updateJobStatus(event.job_id, 'FAILED', {
+                    failed_at: new Date().toISOString(),
+                    error: error.message
+                });
+            } catch (updateError) {
+                logger.error('Failed to update job status', updateError);
+            }
+        }
+
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Request-ID': requestId
+            },
+            body: JSON.stringify({
+                error: error.message,
+                job_id: event.job_id,
+                timestamp: new Date().toISOString()
+            })
+        };
+    }
+};
+
+/**
+ * Process mainframe data for modernization
+ * @param {Object} params - Processing parameters
+ * @returns {Object} Processing results
+ */
+async function processMainframeData({ jobId, bucketName, objectKey, language, metadata }) {
+    logger.info('Processing mainframe data', { jobId, bucketName, objectKey, language });
+
+    try {
+        // Download and process S3 object
+        const s3Object = await s3.getObject({
+            Bucket: bucketName,
+            Key: objectKey
+        }).promise();
+
+        const fileContent = s3Object.Body.toString('utf-8');
+        logger.info('Retrieved S3 object', { 
+            jobId, 
+            contentLength: fileContent.length,
+            contentType: s3Object.ContentType 
+        });
+
+        // Process the mainframe data based on language and type
+        const processedData = await transformMainframeData(fileContent, language, metadata);
+
+        // Generate modernization artifacts
+        const artifacts = await generateModernizationArtifacts(processedData, language);
+
+        // Store results back to S3
+        const outputKey = `processed/${jobId}/results.json`;
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: outputKey,
+            Body: JSON.stringify(artifacts, null, 2),
+            ContentType: 'application/json'
+        }).promise();
+
+        return {
+            processed_data: processedData,
+            artifacts,
+            output_location: `s3://${bucketName}/${outputKey}`,
+            processing_stats: {
+                input_size: fileContent.length,
+                artifacts_generated: Object.keys(artifacts).length,
+                processing_time: new Date().toISOString()
+            }
+        };
+
+    } catch (error) {
+        logger.error('Error processing mainframe data', error);
+        throw new Error(`Failed to process mainframe data: ${error.message}`);
+    }
+}
+
+/**
+ * Transform mainframe data for modernization
+ * @param {string} content - File content
+ * @param {string} language - Target language
+ * @param {Object} metadata - Additional metadata
+ * @returns {Object} Transformed data
+ */
+async function transformMainframeData(content, language, metadata) {
+    logger.info('Transforming mainframe data', { language, contentLength: content.length });
+
+    // Implement your mainframe data transformation logic here
+    const transformedData = {
+        original_format: 'mainframe',
+        target_language: language,
+        transformation_timestamp: new Date().toISOString(),
+        content_analysis: {
+            lines: content.split('\n').length,
+            characters: content.length,
+            estimated_complexity: calculateComplexity(content)
+        },
+        modernization_recommendations: generateRecommendations(content, language),
+        metadata
+    };
+
+    return transformedData;
+}
+
+/**
+ * Generate modernization artifacts
+ * @param {Object} processedData - Processed mainframe data
+ * @param {string} language - Target language
+ * @returns {Object} Generated artifacts
+ */
+async function generateModernizationArtifacts(processedData, language) {
+    logger.info('Generating modernization artifacts', { language });
+
+    const artifacts = {
+        lambda_functions: generateLambdaArtifacts(processedData, language),
+        iam_roles: generateIAMRoles(processedData),
+        step_functions: generateStepFunctions(processedData),
+        dynamodb_tables: generateDynamoDBTables(processedData),
+        api_gateway: generateAPIGateway(processedData),
+        cloudformation: generateCloudFormation(processedData, language)
+    };
+
+    return artifacts;
+}
+
+/**
+ * Update job status in DynamoDB
+ * @param {string} jobId - Job ID
+ * @param {string} status - Job status
+ * @param {Object} additionalData - Additional data to store
+ */
+async function updateJobStatus(jobId, status, additionalData = {}) {
+    const tableName = process.env.JOBS_TABLE_NAME;
+    if (!tableName) {
+        logger.warn('JOBS_TABLE_NAME environment variable not set, skipping status update');
+        return;
+    }
+
+    try {
+        await dynamodb.put({
+            TableName: tableName,
+            Item: {
+                job_id: jobId,
+                status,
+                updated_at: new Date().toISOString(),
+                ...additionalData
+            }
+        }).promise();
+
+        logger.info('Job status updated', { jobId, status });
+    } catch (error) {
+        logger.error('Failed to update job status', error);
+        throw error;
+    }
+}
+
+/**
+ * Calculate content complexity score
+ * @param {string} content - Content to analyze
+ * @returns {number} Complexity score
+ */
+function calculateComplexity(content) {
+    const lines = content.split('\n').length;
+    const functions = (content.match(/function|FUNCTION/gi) || []).length;
+    const conditionals = (content.match(/if|IF|when|WHEN/gi) || []).length;
+    
+    return Math.min(100, Math.round((lines * 0.1) + (functions * 2) + (conditionals * 1.5)));
+}
+
+/**
+ * Generate modernization recommendations
+ * @param {string} content - Content to analyze
+ * @param {string} language - Target language
+ * @returns {Array} Recommendations
+ */
+function generateRecommendations(content, language) {
+    const recommendations = [
+        `Modernize to ${language} using serverless architecture`,
+        'Implement event-driven processing with AWS Lambda',
+        'Use managed databases like DynamoDB for scalability',
+        'Implement proper error handling and logging',
+        'Add monitoring and alerting with CloudWatch'
+    ];
+
+    return recommendations;
+}
+
+/**
+ * Generate Lambda function artifacts
+ * @param {Object} data - Processed data
+ * @param {string} language - Target language
+ * @returns {Object} Lambda artifacts
+ */
+function generateLambdaArtifacts(data, language) {
+    return {
+        main_processor: {
+            runtime: 'nodejs18.x',
+            handler: 'index.handler',
+            timeout: 300,
+            memory: 512,
+            environment: {
+                LANGUAGE: language,
+                LOG_LEVEL: 'INFO'
+            }
+        }
+    };
+}
+
+/**
+ * Generate IAM role artifacts
+ * @param {Object} data - Processed data
+ * @returns {Object} IAM role artifacts
+ */
+function generateIAMRoles(data) {
+    return {
+        lambda_execution_role: {
+            Version: '2012-10-17',
+            Statement: [
+                {
+                    Effect: 'Allow',
+                    Action: [
+                        'logs:CreateLogGroup',
+                        'logs:CreateLogStream',
+                        'logs:PutLogEvents'
+                    ],
+                    Resource: 'arn:aws:logs:*:*:*'
+                },
+                {
+                    Effect: 'Allow',
+                    Action: [
+                        's3:GetObject',
+                        's3:PutObject'
+                    ],
+                    Resource: 'arn:aws:s3:::mainframe-modernization-bucket/*'
+                },
+                {
+                    Effect: 'Allow',
+                    Action: [
+                        'dynamodb:GetItem',
+                        'dynamodb:PutItem',
+                        'dynamodb:UpdateItem'
+                    ],
+                    Resource: 'arn:aws:dynamodb:*:*:table/MainframeModernization*'
+                }
+            ]
+        }
+    };
+}
+
+/**
+ * Generate Step Functions artifacts
+ * @param {Object} data - Processed data
+ * @returns {Object} Step Functions artifacts
+ */
+function generateStepFunctions(data) {
+    return {
+        mainframe_processing_workflow: {
+            Comment: 'Mainframe modernization workflow with JavaScript Lambda functions',
+            StartAt: 'ProcessMainframeData',
+            States: {
+                ProcessMainframeData: {
+                    Type: 'Task',
+                    Resource: 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MainframeProcessor',
+                    End: true
+                }
+            }
+        }
+    };
+}
+
+/**
+ * Generate DynamoDB table artifacts
+ * @param {Object} data - Processed data
+ * @returns {Object} DynamoDB artifacts
+ */
+function generateDynamoDBTables(data) {
+    return {
+        jobs_table: {
+            TableName: 'MainframeModernizationJobs',
+            BillingMode: 'PAY_PER_REQUEST',
+            AttributeDefinitions: [
+                {
+                    AttributeName: 'job_id',
+                    AttributeType: 'S'
+                }
+            ],
+            KeySchema: [
+                {
+                    AttributeName: 'job_id',
+                    KeyType: 'HASH'
+                }
+            ]
+        }
+    };
+}
+
+/**
+ * Generate API Gateway artifacts
+ * @param {Object} data - Processed data
+ * @returns {Object} API Gateway artifacts
+ */
+function generateAPIGateway(data) {
+    return {
+        mainframe_api: {
+            openapi: '3.0.1',
+            info: {
+                title: 'Mainframe Modernization API',
+                version: '1.0.0'
+            },
+            paths: {
+                '/process': {
+                    post: {
+                        summary: 'Process mainframe data',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            bucket_name: { type: 'string' },
+                                            object_key: { type: 'string' }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+}
+
+/**
+ * Generate CloudFormation template
+ * @param {Object} data - Processed data
+ * @param {string} language - Target language
+ * @returns {Object} CloudFormation template
+ */
+function generateCloudFormation(data, language) {
+    return {
+        AWSTemplateFormatVersion: '2010-09-09',
+        Description: `Mainframe modernization infrastructure for ${language}`,
+        Resources: {
+            MainframeLambdaFunction: {
+                Type: 'AWS::Lambda::Function',
+                Properties: {
+                    Runtime: 'nodejs18.x',
+                    Handler: 'index.handler',
+                    Code: {
+                        ZipFile: '// Lambda function code here'
+                    },
+                    Role: {
+                        'Fn::GetAtt': ['LambdaExecutionRole', 'Arn']
+                    }
+                }
+            }
+        }
+    };
+}
+```
+
+## IAM_ROLES
+### [role_name].json
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::mainframe-modernization-bucket",
+        "arn:aws:s3:::mainframe-modernization-bucket/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": "arn:aws:dynamodb:*:*:table/MainframeModernization*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "stepfunctions:StartExecution",
+        "stepfunctions:DescribeExecution"
+      ],
+      "Resource": "arn:aws:states:*:*:stateMachine:MainframeModernization*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+## STEP_FUNCTIONS
+### [workflow_name].json
+```json
+{
+  "Comment": "Mainframe modernization workflow with JavaScript Lambda functions",
+  "StartAt": "ValidateInput",
+  "States": {
+    "ValidateInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:InputValidator",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "bucket_name.$": "$.bucket_name",
+        "object_key.$": "$.object_key",
+        "language": "javascript"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleValidationError",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "ProcessMainframeData"
+    },
+    "ProcessMainframeData": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MainframeProcessor",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "bucket_name.$": "$.bucket_name",
+        "object_key.$": "$.object_key",
+        "language": "javascript",
+        "processing_options": {
+          "generate_artifacts": true,
+          "include_recommendations": true
+        }
+      },
+      "TimeoutSeconds": 300,
+      "HeartbeatSeconds": 60,
+      "Next": "GenerateArtifacts"
+    },
+    "GenerateArtifacts": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "GenerateLambdaArtifacts",
+          "States": {
+            "GenerateLambdaArtifacts": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:LambdaArtifactGenerator",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "processed_data.$": "$.results.processed_data",
+                "target_language": "javascript"
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GenerateInfrastructureArtifacts",
+          "States": {
+            "GenerateInfrastructureArtifacts": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:InfrastructureArtifactGenerator",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "processed_data.$": "$.results.processed_data",
+                "artifact_types": ["iam", "stepfunctions", "dynamodb", "apigateway"]
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "CompleteProcessing"
+    },
+    "CompleteProcessing": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ProcessingCompleter",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "status": "COMPLETED",
+        "lambda_artifacts.$": "$[0]",
+        "infrastructure_artifacts.$": "$[1]",
+        "completion_timestamp.$": "$$.State.EnteredTime"
+      },
+      "End": true
+    },
+    "HandleValidationError": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ErrorHandler",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "error_type": "VALIDATION_ERROR",
+        "error.$": "$.error",
+        "original_input.$": "$",
+        "language": "javascript"
+      },
+      "End": true
+    }
+  }
+}
+```
+
+## DYNAMODB
+### [table_name].json
+```json
+{
+  "TableName": "MainframeModernizationJobs",
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    {
+      "AttributeName": "job_id",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "created_at",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "status",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "language",
+      "AttributeType": "S"
+    }
+  ],
+  "KeySchema": [
+    {
+      "AttributeName": "job_id",
+      "KeyType": "HASH"
+    }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "StatusLanguageIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "status",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "language",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    },
+    {
+      "IndexName": "CreatedAtIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "created_at",
+          "KeyType": "HASH"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    },
+    {
+      "IndexName": "LanguageIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "language",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "created_at",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    }
+  ],
+  "StreamSpecification": {
+    "StreamEnabled": true,
+    "StreamViewType": "NEW_AND_OLD_IMAGES"
+  },
+  "PointInTimeRecoverySpecification": {
+    "PointInTimeRecoveryEnabled": true
+  },
+  "SSESpecification": {
+    "SSEEnabled": true,
+    "SSEType": "KMS"
+  },
+  "Tags": [
+    {
+      "Key": "Project",
+      "Value": "MainframeModernization"
+    },
+    {
+      "Key": "Language",
+      "Value": "JavaScript"
+    },
+    {
+      "Key": "Runtime",
+      "Value": "Node.js"
+    },
+    {
+      "Key": "Environment",
+      "Value": "${Environment}"
+    }
+  ]
+}
+```
+
+## ARCHITECTURE_DIAGRAM
+### architecture.md
+```ascii
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           MAINFRAME MODERNIZATION PLATFORM                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
+│  │   MAINFRAME     │    │      AWS        │    │    BUSINESS     │             │
+│  │   DATA FILES    │───▶│   PROCESSING    │───▶│   APPLICATIONS  │             │
+│  │                 │    │    LAYER        │    │                 │             │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
+│           │                       │                       │                     │
+│           │                       │                       │                     │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
+│  │   S3 INPUT      │    │     LAMBDA      │    │    DYNAMODB     │             │
+│  │   BUCKET        │───▶│   FUNCTIONS     │───▶│    TABLES       │             │
+│  │                 │    │                 │    │                 │             │
+│  │ • VSAM Files    │    │ • Converter     │    │ • Account Data  │             │
+│  │ • Event Trigger │    │ • Processor     │    │ • Job Status    │             │
+│  │ • Versioning    │    │ • Generator     │    │                 │             │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
+│           │                       │                       │                     │
+│           │              ┌─────────────────┐              │                     │
+│           │              │  STEP FUNCTIONS │              │                     │
+│           └─────────────▶│   WORKFLOWS     │◀─────────────┘                     │
+│                          │                 │                                    │
+│                          │ • VSAM Conv.    │                                    │
+│                          │ • Account Proc. │                                    │
+│                          └─────────────────┘                                    │
+│                                   │                                             │
+│                          ┌─────────────────┐                                    │
+│                          │   S3 OUTPUT     │                                    │
+│                          │    BUCKET       │                                    │
+│                          │                 │                                    │
+│                          │ • Standard      │                                    │
+│                          │ • Array         │                                    │
+│                          │ • Variable      │                                    │
+│                          └─────────────────┘                                    │
+│                                   │                                             │
+│                          ┌─────────────────┐                                    │
+│                          │ NOTIFICATIONS   │                                    │
+│                          │                 │                                    │
+│                          │ • SNS Topics    │                                    │
+│                          │ • CloudWatch    │                                    │
+│                          │                 │                                    │
+│                          └─────────────────┘                                    │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## README
+### readme.md
+```markdown
+## Executive Summary of the Modernization Approach
+
+This document outlines the modernization approach for migrating the CBACT01C mainframe batch program to AWS. The program reads account records from an indexed file, processes the data, and writes the processed information into multiple output files with different formats. The modernization strategy focuses on creating a serverless, event-driven architecture that maintains the core business logic while leveraging AWS services for improved scalability, reliability, and cost efficiency.
+
+
+### Implementation Roadmap and Dependencies
+
+1. **Infrastructure Setup (Week 1)**
+   - Create S3 buckets for input and output files
+   - Configure IAM roles and policies
+   - Set up CloudWatch logging and monitoring
+
+2. **Core Processing Implementation (Week 2)**
+   - Develop Lambda function for account data processing
+   - Implement data transformation logic
+   - Create output file generation modules
+
+3. **Integration and Event Configuration (Week 3)**
+   - Configure S3 event notifications
+   - Set up error handling and retry mechanisms
+   - Implement monitoring and alerting
+
+4. **Testing and Validation (Week 4)**
+   - Perform unit and integration testing
+   - Validate data transformation accuracy
+   - Test error handling and recovery
+
+5. **Deployment and Cutover (Week 5)**
+   - Deploy to production environment
+   - Perform parallel runs with mainframe system
+   - Monitor performance and make adjustments
+
+### Data Flow Descriptions
+
+1. **Input Processing**
+   - Account data files are uploaded to the input S3 bucket
+   - S3 event notification triggers the Lambda function
+   - Lambda function reads and validates the input data
+
+2. **Data Transformation**
+   - Lambda function processes account records according to business rules
+   - Performs data transformations and calculations
+   - Handles special cases (e.g., default values for zero amounts)
+
+3. **Output Generation**
+   - Creates three different output formats:
+     - Fixed-length records (equivalent to OUT-FILE)
+     - Array-structured records (equivalent to ARRY-FILE)
+     - Variable-length records (equivalent to VBRC-FILE)
+   - Writes output files to the designated S3 bucket
+
+### Security Considerations
+
+- **Data Protection**
+  - S3 buckets configured with server-side encryption
+  - Data in transit protected with TLS
+  - Bucket policies to restrict access
+
+- **Access Control**
+  - IAM roles with least privilege permissions
+  - Resource-based policies for S3 buckets
+  - Secure Lambda execution environment
+
+- **Monitoring and Auditing**
+  - CloudTrail for API activity logging
+  - CloudWatch for operational monitoring
+  - S3 access logging enabled
+
+### Cost Optimization Strategies
+
+- **Serverless Architecture**
+  - Pay-only-for-what-you-use Lambda execution
+  - No idle infrastructure costs
+
+- **Storage Optimization**
+  - S3 lifecycle policies for output file management
+  - S3 storage class selection based on access patterns
+
+- **Operational Efficiency**
+  - Automated error handling reduces manual intervention
+  - Event-driven architecture eliminates polling costs
+
+### Monitoring and Logging Approach
+
+- **Lambda Function Monitoring**
+  - CloudWatch metrics for invocation count, duration, and errors
+  - Custom metrics for business-specific KPIs
+
+- **Comprehensive Logging**
+  - Structured logging with consistent format
+  - Log levels for different severity of events
+  - Log retention policies aligned with business requirements
+
+- **Alerting**
+  - CloudWatch alarms for error thresholds
+  - SNS notifications for critical failures
+  - Dashboard for operational visibility
+
+### Error Handling Strategies
+
+- **Input Validation**
+  - Validate file format and content before processing
+  - Reject and notify on invalid input
+
+- **Processing Errors**
+  - Graceful handling of business rule exceptions
+  - Detailed error messages with context
+
+- **System Failures**
+  - Automatic retries for transient failures
+  - Dead-letter queue for persistent failures
+  - Comprehensive error reporting
+
+### Deployment Instructions
+
+1. **Prerequisites**
+   - AWS CLI configured with appropriate permissions
+   - AWS SAM CLI installed for serverless deployment
+   - Node.js 18+ for Lambda development
+
+2. **Deployment Steps**
+   - Clone the repository
+   - Run `sam build` to build the application
+   - Run `sam deploy --guided` for interactive deployment
+   - Follow prompts to configure deployment parameters
+
+3. **Verification**
+   - Upload a test file to the input S3 bucket
+   - Verify Lambda execution in CloudWatch Logs
+   - Check output files in the output S3 bucket
+```
+
+## Architecture Components
+
+### JavaScript/Node.js Lambda Functions
+- **Rapid Development**: JavaScript's flexibility enables quick prototyping and iteration
+- **Rich Ecosystem**: Access to npm's vast library ecosystem
+- **JSON Native**: Native JSON processing ideal for modern APIs
+- **Async/Await**: Modern asynchronous programming patterns
+- **AWS SDK**: Comprehensive AWS SDK for JavaScript with promise support
+
+### Key Components:
+- **Lambda Functions**: Event-driven processing with Node.js runtime
+- **Step Functions**: Orchestrate complex workflows with error handling
+- **DynamoDB**: NoSQL data storage with native JSON support
+- **S3**: Secure data storage with streaming capabilities
+- **API Gateway**: RESTful APIs for external integration
+- **IAM Roles**: Fine-grained security controls
+
+## JavaScript-Specific Features
+- **NPM Packages**: Rich ecosystem of packages for data processing
+- **ES6+ Features**: Modern JavaScript syntax and features
+- **Async Processing**: Promise-based asynchronous operations
+- **JSON Handling**: Native JSON parsing and manipulation
+- **Testing**: Jest framework for comprehensive testing
+- **Linting**: ESLint for code quality and consistency
+
+## Package Management
+```json
+{
+  "name": "mainframe-modernization",
+  "version": "1.0.0",
+  "description": "Mainframe modernization with JavaScript/Node.js",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1400.0",
+    "uuid": "^9.0.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0",
+    "@aws-sdk/client-lambda": "^3.0.0"
+  }
+}
+```
+
+## Development
+```bash
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Run linting
+npm run lint
+
+# Format code
+npm run format
+
+# Build for deployment
+npm run build
+```
+
+## Deployment
+```bash
+# Package for Lambda
+zip -r function.zip index.js node_modules/
+
+# Deploy with SAM
+sam build
+sam deploy --guided
+
+# Deploy with Serverless Framework
+serverless deploy
+```
+
+## Performance Optimizations
+- **Connection Reuse**: Persistent AWS service connections
+- **Memory Management**: Efficient memory usage patterns
+- **Cold Start Optimization**: Minimize initialization overhead
+- **Streaming**: Stream processing for large datasets
+- **Caching**: In-memory caching for frequently accessed data
+
+## Security Considerations
+- All data encrypted at rest and in transit
+- IAM roles follow principle of least privilege
+- Input validation and sanitization
+- Secrets managed through AWS Secrets Manager
+- Dependency vulnerability scanning with npm audit
+```
+
+## REASONING
+### analysis.md
+```markdown
+# Analysis and Reasoning - JavaScript/Node.js Implementation
+
+## JavaScript-Specific Architecture Decisions
+
+### Lambda Functions with Node.js 18.x
+**Selection Reasoning**: JavaScript/Node.js was chosen for Lambda functions because:
+1. **Rapid Development**: Fast prototyping and development cycles
+2. **JSON Native**: Native JSON processing ideal for modern cloud applications
+3. **Rich Ecosystem**: Access to npm's extensive package ecosystem
+4. **Async Programming**: Built-in support for asynchronous operations
+5. **AWS Integration**: Comprehensive AWS SDK with promise support
+
+### Asynchronous Processing Patterns
+**JavaScript-Specific Advantages**:
+1. **Promises/Async-Await**: Modern asynchronous programming patterns
+2. **Event Loop**: Non-blocking I/O operations
+3. **Callbacks**: Event-driven programming model
+4. **Streaming**: Efficient processing of large datasets
+5. **Concurrency**: Handle multiple operations simultaneously
+
+### Error Handling Strategy
+**JavaScript-Specific Approach**:
+1. **Try-Catch**: Comprehensive error handling with async/await
+2. **Promise Rejection**: Proper handling of rejected promises
+3. **Error Objects**: Rich error information with stack traces
+4. **Logging**: Structured logging with JSON format
+5. **Graceful Degradation**: Fallback mechanisms for service failures
+
+## Integration Strategy
+This JavaScript implementation integrates with AWS services through:
+- **AWS SDK v2/v3**: Comprehensive AWS service integration
+- **Promise-based APIs**: Modern asynchronous patterns
+- **CloudWatch Logs**: Native logging integration
+- **X-Ray Tracing**: Distributed tracing for performance analysis
+- **Environment Variables**: Configuration management
+
+## Performance Considerations
+- **Cold Start Optimization**: Minimize initialization overhead
+- **Connection Pooling**: Reuse AWS service connections
+- **Memory Management**: Efficient memory usage patterns
+- **Streaming Processing**: Handle large datasets efficiently
+- **Caching Strategies**: In-memory and external caching
+
+## Security Best Practices
+- **Input Validation**: Comprehensive input sanitization
+- **Dependency Management**: Regular security updates with npm audit
+- **Secrets Management**: AWS Secrets Manager integration
+- **Error Handling**: Prevent information leakage in error messages
+- **HTTPS Enforcement**: Secure communication channels
+
+## Mainframe Modernization Patterns
+- **Data Transformation**: Flexible data format conversions
+- **API Integration**: RESTful APIs for external systems
+- **Event Processing**: Event-driven architecture patterns
+- **Batch Processing**: Efficient processing of large datasets
+- **Real-time Processing**: Stream processing capabilities
+
+## Development Best Practices
+- **Code Quality**: ESLint for consistent code style
+- **Testing**: Comprehensive unit and integration tests
+- **Documentation**: Clear API documentation
+- **Version Control**: Semantic versioning for packages
+- **CI/CD Integration**: Automated testing and deployment
+```
+
+Focus on JavaScript's flexibility, async capabilities, and rich ecosystem. Ensure all code follows modern JavaScript best practices with proper error handling, logging, and security considerations for mainframe modernization scenarios.

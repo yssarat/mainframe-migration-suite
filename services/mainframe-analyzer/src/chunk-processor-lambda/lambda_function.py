@@ -9,10 +9,17 @@ import re
 from typing import Dict, Any, Generator, Optional, List
 from dataclasses import dataclass
 
+# Import shared prompt manager
+import sys
+sys.path.append('/opt')
+from shared.prompt_manager import PromptManager
+
 # Initialize clients
 s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
-ssm_client = boto3.client('ssm')
+
+# Initialize prompt manager (reused across warm starts)
+prompt_manager = PromptManager()
 
 # Initialize global variable for throttling
 time_last = 0
@@ -69,6 +76,10 @@ class ChunkStreamingExtractor:
         
         self.file_patterns = {
             'python': r'^###\s*(.+\.py)',
+            'csharp': r'^###\s*(.+\.cs)',  # .NET/C# files
+            'java': r'^###\s*(.+\.java)',  # Java files
+            'go': r'^###\s*(.+\.go)',      # Go files
+            'javascript': r'^###\s*(.+\.js)', # JavaScript files
             'json': r'^###\s*(.+\.json)',
             'yaml': r'^###\s*(.+\.ya?ml)',
             'markdown': r'^###\s*(.+\.md)',
@@ -76,155 +87,140 @@ class ChunkStreamingExtractor:
             'sql': r'^###\s*(.+\.sql)',
             'dockerfile': r'^###\s*(Dockerfile.*)',
             'terraform': r'^###\s*(.+\.tf)',
-            'properties': r'^###\s*(.+\.properties)'
+            'properties': r'^###\s*(.+\.properties)',
+            'csproj': r'^###\s*(.+\.csproj)',  # .NET project files
+            'xml': r'^###\s*(.+\.xml)'         # XML files
         }
 
     def stream_bedrock_response(self, prompt: str) -> Generator[str, None, None]:
-        """Stream response from Bedrock for chunk processing"""
+        """Stream response from Bedrock with enhanced system prompt for chunk processing"""
         try:
             model_id = os.environ.get('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
             
-            # Enhanced system prompt for chunk processing
-            system_prompt = f"""You are an expert AWS architect specializing in mainframe modernization. 
+            # Get system prompt from S3 with language support
+            target_language = os.environ.get('TARGET_LANGUAGE', 'python')
+            print(f"[LANGUAGE] Target language: {target_language}")
+            base_prompt = prompt_manager.get_prompt('analysis-agent', target_language)
+            
+            if not base_prompt:
+                print("Could not retrieve system prompt from S3, using minimal fallback")
+                base_prompt = "You are an expert AWS architect specializing in mainframe modernization."
+            else:
+                print(f"[PROMPT] Retrieved {len(base_prompt)} character prompt for {target_language}")
+            
+            # Enhanced system prompt for streaming file extraction with chunk processing
+            # Get file extension and language-specific instructions based on target language
+            if target_language == 'dotnet':
+                file_extension = '.cs'
+                language_instruction = '.NET/C# code with proper namespaces, using statements, and error handling'
+            elif target_language == 'java':
+                file_extension = '.java'
+                language_instruction = 'Java code with proper package declarations, imports, and exception handling'
+            elif target_language == 'go':
+                file_extension = '.go'
+                language_instruction = 'Go code with proper package declarations, imports, and error handling'
+            elif target_language == 'javascript':
+                file_extension = '.js'
+                language_instruction = 'JavaScript/Node.js code with proper module exports and error handling'
+            else:  # python (default)
+                file_extension = '.py'
+                language_instruction = 'Python code with proper imports and error handling'
+            
+            print(f"[LANGUAGE] Chunk {self.chunk_index}: Using file extension: {file_extension} for {target_language}")
+            
+            enhanced_system_prompt = f"""{base_prompt}
 
-This is chunk {self.chunk_index} of a larger mainframe modernization analysis.
+CRITICAL INSTRUCTIONS FOR STRUCTURED OUTPUT (CHUNK PROCESSING):
 
-CRITICAL: Generate complete, production-ready AWS artifacts in this EXACT structure:
+You MUST organize your response using these exact section headers and follow the language-specific format:
 
 ## LAMBDA_FUNCTIONS
-### function_name_chunk{self.chunk_index}.py
-```python
-[Complete Python Lambda function with all imports, error handling, and logging]
-```
+### function_name_chunk{self.chunk_index}{file_extension}
+[{language_instruction}]
+
+CRITICAL FILENAME REQUIREMENTS FOR CHUNK {self.chunk_index}:
+- IGNORE any file extensions from the input documentation (.py, .cs, .js, etc.)
+- ALWAYS use {file_extension} extension for ALL Lambda function files in this chunk
+- Generate meaningful function names but ALWAYS end with {file_extension}
+- Example: AccountProcessor_chunk{self.chunk_index}{file_extension}, ErrorHandler_chunk{self.chunk_index}{file_extension}
+- DO NOT copy .py, .cs, or other extensions from input - ONLY use {file_extension}
+- Target language is {target_language} - generate {target_language} code with {file_extension} files
 
 ## IAM_ROLES  
 ### role_name_chunk{self.chunk_index}.json
-```json
-{{
-  "Version": "2012-10-17",
-  "Statement": [complete IAM policy for this chunk's functionality]
-}}
-```
+[IAM role definition in JSON]
+
+## DYNAMODB
+### table_name_chunk{self.chunk_index}.json
+[DynamoDB table definition]
+
+## S3
+### bucket_config_chunk{self.chunk_index}.yaml
+[S3 bucket configuration]
 
 ## STEP_FUNCTIONS
 ### workflow_name_chunk{self.chunk_index}.json
-```json
-{{
-  "Comment": "Mainframe modernization workflow for chunk {self.chunk_index}",
-  "StartAt": "...",
-  [complete state machine definition]
-}}
-```
+[Step Functions definition]
+
+## API_GATEWAY
+### api_config_chunk{self.chunk_index}.yaml
+[API Gateway configuration]
+
+## CLOUDFORMATION
+### template_name_chunk{self.chunk_index}.yaml
+[CloudFormation template]
 
 ## README
 ### README_chunk{self.chunk_index}.md
-```markdown
-# Mainframe Modernization - Chunk {self.chunk_index}
+[Project documentation and setup instructions for this chunk]
 
-## Overview
-This chunk implements specific components of the comprehensive AWS serverless solution to modernize mainframe batch processing systems. This section focuses on [specific functionality] while maintaining integration with the overall modernization architecture.
-
-## Architecture Components
-The components in this chunk follow AWS Well-Architected Framework principles:
-
-### Key Components for Chunk {self.chunk_index}:
-- **Lambda Functions**: Process specific business logic with automatic scaling
-- **Step Functions**: Orchestrate chunk-specific workflows with error handling
-- **DynamoDB**: Store chunk-specific processed data with high performance
-- **IAM Roles**: Secure access controls following least privilege principles
-
-## Integration Points
-This chunk integrates with the overall modernization platform through:
-1. Shared S3 buckets for data exchange
-2. Common DynamoDB tables for state management
-3. Unified SNS topics for notifications
-4. EventBridge for cross-chunk communication
-
-## Deployment
-This chunk can be deployed independently or as part of the complete platform.
-
-## Security Considerations
-- All data encrypted at rest and in transit
-- IAM roles follow principle of least privilege
-- Chunk-specific resource isolation where appropriate
-```
+## ARCHITECTURE_DIAGRAM
+### architecture_chunk{self.chunk_index}.md
+[Architecture overview and design decisions for this chunk]
 
 ## REASONING
 ### analysis_chunk{self.chunk_index}.md
-```markdown
-# Analysis and Reasoning - Chunk {self.chunk_index}
+[Technical reasoning and modernization rationale for this chunk]
 
-## Chunk-Specific Analysis
-This chunk addresses specific aspects of the mainframe modernization project, focusing on [specific functionality area].
-
-## AWS Service Selection for This Chunk
-
-### Lambda Functions for Chunk Processing
-**Selection Reasoning**: Lambda functions in this chunk were chosen because:
-1. **Specific Processing Logic**: Each function handles discrete operations relevant to this chunk
-2. **Integration**: Seamless integration with other chunk components and overall platform
-3. **Scalability**: Automatic scaling for chunk-specific workloads
-4. **Cost Efficiency**: Pay-per-use model for chunk-specific processing
-
-### Step Functions for Chunk Orchestration
-**Selection Reasoning**: Step Functions orchestrate chunk-specific workflows:
-1. **Workflow Isolation**: Chunk-specific workflows can be managed independently
-2. **Error Handling**: Built-in retry and error handling for chunk operations
-3. **State Management**: Maintains state across chunk-specific processing steps
-4. **Monitoring**: Detailed visibility into chunk-specific execution
-
-### DynamoDB for Chunk Data
-**Selection Reasoning**: DynamoDB stores chunk-specific data:
-1. **Performance**: Fast access to chunk-specific data
-2. **Scalability**: Handles varying data volumes for this chunk
-3. **Integration**: Works seamlessly with chunk Lambda functions
-4. **Consistency**: Maintains data consistency within chunk operations
-
-## Integration Strategy
-This chunk integrates with the overall platform through:
-- **Data Flow**: Receives input from previous chunks, provides output to subsequent chunks
-- **State Management**: Maintains chunk state in shared DynamoDB tables
-- **Error Handling**: Participates in platform-wide error handling and retry mechanisms
-- **Monitoring**: Contributes metrics to platform-wide monitoring dashboards
-
-## Performance Considerations for This Chunk
-- Lambda memory allocation optimized for chunk-specific processing requirements
-- DynamoDB capacity planning based on chunk-specific access patterns
-- Step Functions workflow design optimized for chunk processing efficiency
-- Error handling and retry logic tailored to chunk-specific failure modes
-
-## Security Considerations for This Chunk
-- IAM roles scoped to minimum permissions required for chunk operations
-- Data encryption for chunk-specific sensitive information
-- Network isolation where appropriate for chunk processing
-- Audit logging for chunk-specific operations
-```
-
-Continue this pattern for ALL AWS services relevant to this chunk. Each file must be:
-- Complete and deployable
-- Include proper error handling
-- Follow AWS best practices
-- Be production-ready
-- Include chunk-specific naming to avoid conflicts
-
-Focus on mainframe modernization patterns relevant to this chunk."""
+ABSOLUTE REQUIREMENTS FOR CHUNK {self.chunk_index}: 
+- Each section MUST start with ## followed by the section name
+- Each file MUST start with ### followed by the filename
+- MANDATORY: Use ONLY {file_extension} extension for ALL Lambda function files in this chunk
+- Target language: {target_language}
+- Provide complete, production-ready {target_language} code for each file
+- Follow {target_language} best practices and conventions
+- This is chunk {self.chunk_index} of a larger analysis - ensure integration compatibility
+- IGNORE input file extensions - generate appropriate {target_language} filenames with {file_extension}
+- Include chunk identifier (_chunk{self.chunk_index}) in filenames to avoid conflicts
+- Focus on the specific content provided in this chunk
+- Include proper error handling and best practices
+- Focus on AWS serverless and managed services for mainframe modernization
+"""
             
+            # Prepare the request with enhanced system prompt
             request_body = {
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 131000,
+                "max_tokens": 131000,  # Safe limit under Claude's 131,072 token maximum
+                "system": enhanced_system_prompt,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
                 "temperature": 0.1,
-                "top_p": 0.9,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": prompt}]
+                "top_p": 0.9
             }
             
-            print(f"[BEDROCK] Starting streaming response for chunk {self.chunk_index}")
+            print(f"[BEDROCK] Starting streaming request for chunk {self.chunk_index} to {model_id}")
             
+            # Make streaming request to Bedrock
             response = self.bedrock_client.invoke_model_with_response_stream(
                 modelId=model_id,
                 body=json.dumps(request_body)
             )
             
+            # Process streaming response
             total_chars = 0
             for event in response['body']:
                 if 'chunk' in event:
@@ -334,7 +330,14 @@ Focus on mainframe modernization patterns relevant to this chunk."""
         for file_type, pattern in self.file_patterns.items():
             match = re.match(pattern, line, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                filename = match.group(1).strip()
+                print(f"[FILE DETECTION] Chunk {self.chunk_index}: Detected {file_type} file: {filename} from line: {line[:100]}")
+                return filename
+        
+        # Log lines that look like file headers but don't match our patterns
+        if line.strip().startswith('###'):
+            print(f"[FILE DETECTION] Chunk {self.chunk_index}: Unmatched file header: {line[:100]}")
+        
         return None
 
     def is_file_complete(self, line: str) -> bool:
@@ -457,6 +460,14 @@ Focus on mainframe modernization patterns relevant to this chunk."""
         """Get content type based on file extension"""
         if filename.endswith('.py'):
             return 'text/x-python'
+        elif filename.endswith('.cs'):
+            return 'text/x-csharp'
+        elif filename.endswith('.java'):
+            return 'text/x-java'
+        elif filename.endswith('.go'):
+            return 'text/x-go'
+        elif filename.endswith('.js'):
+            return 'text/javascript'
         elif filename.endswith('.json'):
             return 'application/json'
         elif filename.endswith('.md'):
@@ -469,8 +480,54 @@ Focus on mainframe modernization patterns relevant to this chunk."""
             return 'application/sql'
         elif filename.endswith('.tf'):
             return 'text/x-terraform'
+        elif filename.endswith('.csproj'):
+            return 'application/xml'
+        elif filename.endswith('.xml'):
+            return 'application/xml'
         else:
             return 'text/plain'
+
+    def process_streaming_response(self, prompt: str) -> Dict[str, Any]:
+        """Process streaming response and extract files"""
+        print(f"[STREAMING] Starting file extraction for chunk {self.chunk_index}")
+        
+        try:
+            # Stream response and process line by line
+            for chunk in self.stream_bedrock_response(prompt):
+                self.buffer += chunk
+                
+                # Process complete lines
+                while '\n' in self.buffer:
+                    line, self.buffer = self.buffer.split('\n', 1)
+                    self.process_line(line)
+            
+            # Process any remaining buffer
+            if self.buffer.strip():
+                self.process_line(self.buffer)
+                if self.current_file and self.current_content:
+                    self.save_current_file()
+            
+            # Save any remaining file
+            if self.current_file and self.current_content:
+                self.save_current_file()
+            
+            # Group files by section for summary
+            files_by_section = {}
+            for file_info in self.files_created:
+                section = file_info['section']
+                if section not in files_by_section:
+                    files_by_section[section] = []
+                files_by_section[section].append(file_info)
+            
+            return {
+                'status': 'success',
+                'total_files_created': len(self.files_created),
+                'files_by_section': files_by_section,
+                'all_files': self.files_created
+            }
+            
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
 
     def finalize_processing(self):
         """Finalize processing and save any remaining content"""
@@ -509,53 +566,6 @@ def update_job_status(job_id: str, status: str, message: str = None) -> None:
         )
     except Exception as e:
         print(f"Error updating job status: {str(e)}")
-
-def get_prompt_template(template_path: str) -> str:
-    """Retrieves the prompt template from Parameter Store."""
-    try:
-        response = ssm_client.get_parameter(
-            Name=template_path,
-            WithDecryption=True
-        )
-        return response['Parameter']['Value']
-    except Exception as e:
-        print(f"Error retrieving prompt template: {str(e)}")
-        # Return a default template if the parameter doesn't exist
-        return """
-        You are an expert in AWS architecture and mainframe modernization. Analyze the following mainframe code and generate detailed AWS artifacts that would be needed to implement this functionality in AWS.
-
-        For each AWS service type, provide complete, implementation-ready code and configurations, not just summaries.
-
-        {content}
-
-        Organize your response by AWS service type, using the following format:
-        
-        ## LAMBDA_FUNCTIONS
-        [Provide complete Lambda function code]
-        
-        ## IAM_ROLES
-        [Provide complete IAM role definitions in JSON]
-        
-        ## DYNAMODB
-        [Provide complete DynamoDB table definitions in JSON]
-        
-        ## S3
-        [Provide S3 bucket configurations and policies]
-        
-        ## SQS_SNS_EVENTBRIDGE
-        [Provide queue, topic, and rule definitions]
-        
-        ## STEP_FUNCTIONS
-        [Provide complete state machine definitions]
-        
-        ## AWS_GLUE
-        [Provide Glue job and crawler definitions]
-        
-        ## OTHER_SERVICES
-        [Any other relevant AWS services]
-        
-        Be thorough and provide actual implementations, not just descriptions.
-        """
 
 def estimate_token_count(text: str) -> int:
     """Estimates the token count for a given text."""
@@ -696,38 +706,54 @@ def parse_llm_response_by_service(llm_response: str) -> Dict[str, str]:
 
 def process_chunk_with_streaming(chunk_content: str, bucket_name: str, output_path: str, chunk_index: int) -> Dict[str, Any]:
     """
-    Process a chunk using streaming file extraction
+    Process a chunk using streaming file extraction with enhanced prompting
     """
     print(f"[STREAMING] Starting streaming file extraction for chunk {chunk_index}")
     
     # Create the streaming extractor for this chunk
-    extractor = ChunkStreamingExtractor(bucket_name, f"{output_path}/chunk_{chunk_index}_files", chunk_index)
+    extractor = ChunkStreamingExtractor(bucket_name, f"{output_path}/aws-artifacts", chunk_index)
     
     try:
-        # Stream the response and process in real-time
-        for chunk in extractor.stream_bedrock_response(chunk_content):
-            if chunk.startswith("Error:"):
-                return {'status': 'error', 'error': chunk}
-            
-            extractor.process_streaming_chunk(chunk)
+        # Create enhanced analysis prompt for chunk processing
+        enhanced_prompt = f"""
+Please analyze the following mainframe documentation chunk and provide comprehensive modernization recommendations with structured AWS implementations:
+
+CHUNK CONTENT:
+{chunk_content}
+
+Please provide a complete modernization solution for this specific chunk, organized by AWS service categories. Create specific implementation files for each service category found in this chunk:
+
+1. **Lambda Functions**: Create Python Lambda functions for business logic migration
+2. **IAM Roles**: Define security roles and policies for each service
+3. **DynamoDB**: Design NoSQL table structures for data migration
+4. **S3**: Configure storage buckets and lifecycle policies
+5. **Step Functions**: Orchestrate complex workflows
+6. **API Gateway**: Create REST/GraphQL APIs for external interfaces
+7. **CloudFormation**: Infrastructure as Code templates
+8. **Documentation**: README, architecture diagrams, and implementation reasoning
+
+Focus on:
+- Production-ready, secure implementations specific to this chunk
+- Best practices for each AWS service
+- Proper error handling and monitoring
+- Integration points with other chunks
+- Migration-specific considerations for mainframe workloads in this chunk
+
+Provide complete, deployable code for each component found in this chunk.
+"""
         
-        # Finalize processing
-        extractor.finalize_processing()
+        # Process streaming response and extract files
+        streaming_result = extractor.process_streaming_response(enhanced_prompt)
         
-        # Group files by section
-        files_by_section = {}
-        for file_info in extractor.files_created:
-            section = file_info['section']
-            if section not in files_by_section:
-                files_by_section[section] = []
-            files_by_section[section].append(file_info)
+        if streaming_result['status'] == 'error':
+            return {'status': 'error', 'error': streaming_result['error']}
         
         return {
             'status': 'success',
             'chunk_index': chunk_index,
-            'total_files_created': len(extractor.files_created),
-            'files_by_section': files_by_section,
-            'all_files': extractor.files_created
+            'total_files_created': streaming_result['total_files_created'],
+            'files_by_section': streaming_result['files_by_section'],
+            'all_files': streaming_result['all_files']
         }
         
     except Exception as e:
@@ -776,7 +802,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return {'status': 'error', 'error': error_message}
             
             # Save chunk results summary
-            result_key = f"{output_path}/results/chunk_{chunk_index}_streaming_results.json"
+            result_key = f"{output_path}/aws-artifacts/results/chunk_{chunk_index}_streaming_results.json"
             s3_client.put_object(
                 Bucket=bucket_name,
                 Key=result_key,
@@ -793,48 +819,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'total_files_created': streaming_result['total_files_created'],
                 'files_by_section': streaming_result['files_by_section'],
                 'all_files': streaming_result['all_files']
-            }
-        
-        else:
-            # Fall back to traditional processing
-            print(f"[PROCESSING] Using traditional processing for chunk {chunk_index}")
-            
-            # Get prompt template from Parameter Store
-            prompt_template_path = os.environ.get('PROMPT_TEMPLATE_PATH', '/mainframe-modernization/documentation-agent/updated-prompt')
-            prompt_template = get_prompt_template(prompt_template_path)
-            
-            # Apply template to chunk content
-            formatted_prompt = prompt_template.replace("{content}", chunk_content)
-            
-            # Call Bedrock to analyze the chunk with the formatted prompt
-            print(f"[PROCESSING] Analyzing chunk {chunk_index} of {total_chunks}")
-            analysis_result = call_llm_converse(formatted_prompt, wait=(chunk_index > 1))
-            
-            # Check if the analysis was successful
-            if analysis_result.startswith("Error:"):
-                error_message = f"Error analyzing chunk {chunk_index}: {analysis_result}"
-                print(f"[ERROR] {error_message}")
-                return {'status': 'error', 'error': error_message}
-            
-            # Parse the result by service
-            service_contents = parse_llm_response_by_service(analysis_result)
-            
-            # Save the results to S3
-            result_key = f"{output_path}/results/chunk_{chunk_index}_results.json"
-            s3_client.put_object(
-                Bucket=bucket_name,
-                Key=result_key,
-                Body=json.dumps(service_contents, indent=2).encode('utf-8')
-            )
-            
-            return {
-                'status': 'success',
-                'job_id': job_id,
-                'chunk_index': chunk_index,
-                'total_chunks': total_chunks,
-                'result_key': result_key,
-                'streaming_extraction': False,
-                'service_contents': service_contents
             }
         
     except Exception as e:

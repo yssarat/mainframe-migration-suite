@@ -21,6 +21,17 @@ Parameters:
     Default: 600
     Description: Idle session timeout in seconds for Bedrock agents
 
+  TargetLanguage:
+    Type: String
+    Default: python
+    AllowedValues:
+      - python
+      - dotnet
+      - java
+      - go
+      - javascript
+    Description: Target programming language for generated artifacts
+
   DeployServices:
     Type: String
     Default: 'both'
@@ -77,6 +88,7 @@ Resources:
       Parameters:
         BedrockModelId: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${FoundationModel}'
         Environment: !Ref Environment
+        TargetLanguage: !Ref TargetLanguage
         ParameterStorePrefix: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
         LambdaCodeBucket: !If 
           - CreateLambdaBucket

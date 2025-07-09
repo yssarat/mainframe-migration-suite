@@ -36,15 +36,26 @@ Parameters:
     Default: 15000
     Description: Maximum tokens per chunk
 
-  ParameterStorePrefix:
+  TargetLanguage:
     Type: String
-    Default: /mainframe-modernization/documentation-agent/dev/updated-prompt
-    Description: Parameter Store parameter for LLM prompt
+    Default: python
+    AllowedValues:
+      - python
+      - dotnet
+      - java
+      - go
+      - javascript
+    Description: Target programming language for generated artifacts
 
   LambdaCodeBucket:
     Type: String
     Description: S3 bucket containing Lambda code packages
     Default: ''
+  
+  ParameterStorePrefix:
+    Type: String
+    Description: Prefix for Parameter Store parameters
+    Default: '/mainframe-modernization/documentation-agent/dev/updated-prompt'
   
   LambdaTimeout:
     Type: Number
@@ -60,147 +71,35 @@ Conditions:
   CreateLambdaBucket: !Equals [!Ref LambdaCodeBucket, '']
 
 Resources:
-  # Parameter Store for Prompt Template
-  PromptTemplate:
-    Type: AWS::SSM::Parameter
+  # S3 Bucket for Prompt Storage
+  PromptsS3Bucket:
+    Type: AWS::S3::Bucket
     Properties:
-      Name: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
-      Type: String
-      Tier: Advanced
-      Value: |
-        As an AWS developer analyzing mainframe documentation located in S3 bucket '{bucket}' under folder '{folder}', your task is to:
+      BucketName: !Sub "mainframe-modernization-prompts-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: MainframeAnalyzer
+        - Key: Purpose
+          Value: PromptStorage
 
-        1. CONTEXT:
-        - Analyze mainframe program documentation thoroughly and systematically
-        - Identify core business logic, data flows, and processing patterns
-        - Map mainframe concepts to the most appropriate AWS services based on functionality, not limited to those mentioned in this prompt
-        - Consider scalability, reliability, security, and AWS best practices
-        - Maintain consistency in your analysis approach across all mainframe artifacts
-        - Preserve all data structures and record types exactly as they appear in mainframe components
-        - Ensure file extensions match the appropriate AWS service output format
-        
-        2. REQUIREMENTS ANALYSIS:
-        - Extract key business rules and workflows with consistent methodology
-        - Document all data structures and relationships in standardized format
-        - Map dependencies between modules using consistent notation
-        - Catalog batch processes and scheduling requirements systematically
-        - Document I/O operations and file handling patterns comprehensively
-        - Use appropriate file extensions for all output files (.json, .yaml, .py, etc.)
-        - Create detailed AWS architecture diagrams with consistent notation
-        
-        3. AWS SERVICE SELECTION:
-        - Consider the FULL range of AWS services for each mainframe component
-        - Evaluate each service based on:
-            * Functional requirements match
-            * Performance characteristics
-            * Cost efficiency
-            * Operational complexity
-            * Integration capabilities
-            * Scalability and elasticity
-        - Document your reasoning for EACH service selection in a dedicated reasoning.md file
-        - For similar mainframe components, use consistent service mapping patterns
-        - Do not create redundant execution paths for the same functionality
-        
-        4. AWS SERVICE MAPPING GUIDELINES:
-        - For batch processing: Consider AWS Batch, AWS Glue, Step Functions, or Lambda
-        - For data storage: Evaluate across RDS, DynamoDB, S3, ElastiCache, Neptune, DocumentDB, etc. based on:
-            * Data structure (relational, document, graph, key-value)
-            * Access patterns and query requirements
-            * Transaction and consistency requirements
-            * Volume and velocity of data
-        - For inter-service communication:
-            * Synchronous: API Gateway, AppSync, Application Load Balancer
-            * Asynchronous: SQS, SNS, EventBridge, Kinesis, MSK
-        - For file processing: S3 events, Lambda, AWS Transfer Family
-        - For security: IAM, KMS, Secrets Manager, WAF, Shield
-        - For monitoring: CloudWatch, X-Ray, CloudTrail
-        
-        5. IMPLEMENTATION DESIGN:
-        - Create modular components aligned with single responsibility principle
-        - Implement comprehensive error handling and logging
-        - Include input validation and data integrity checks
-        - Set up appropriate IAM roles with least privilege permissions
-        - Configure environment variables for configuration management
-        - Implement retry mechanisms and circuit breakers where appropriate
-        - Use the latest stable versions of all runtimes and services
-        - Design for high availability and disaster recovery
-        
-        6. INTEGRATION PATTERNS:
-        - Define clear API contracts for all service interfaces
-        - Document message formats and schemas for event-driven communication
-        - Specify error handling, retry logic, and recovery procedures
-        - Include comprehensive monitoring, alerting, and observability requirements
-        - Design consistent state management across distributed components
-        
-        Based on the above analysis, please generate your response in a structured format with clearly separated sections for each AWS service type. Generate appropriate file extensions for all output artifacts. Use the following format with clear section markers:
-        
-        ## LAMBDA_FUNCTIONS
-        [All Lambda function code, configurations, and explanations]
-        
-        ## IAM_ROLES
-        [All IAM roles, policies, and permissions]
-        
-        ## DYNAMODB
-        [DynamoDB table designs, access patterns, and configurations]
-        
-        ## RDS
-        [RDS table designs, access patterns, and configurations]
-         
-        ## API_GATEWAY
-        [API Gateway configurations, routes, and integrations]
-        
-        ## AWS_GLUE
-        [Glue jobs, scripts, configurations and integrations]
-        
-        ## S3
-        [S3 bucket configurations, lifecycle policies, and access patterns]
-        
-        ## SQS_SNS_EVENTBRIDGE
-        [SQS/SNS/EventBridge configurations, topics, queues, and subscriptions]
-        
-        ## STEP_FUNCTIONS
-        [Step Functions state machines and workflow definitions]
-        
-        ## OTHER_SERVICES
-        [Any other AWS services not covered above, with clear subsections]
-        
-        7. MANDATORY OUTPUT FILES:
-        You must generate two separate files with the following exact names and contents:
-        
-        a) readme.md
-        Must contain:
-        - Executive summary of the modernization approach
-        - Architecture diagram in ASCII format
-        - Implementation roadmap and dependencies
-        - Data flow descriptions
-        - Security considerations
-        - Cost optimization strategies
-        - Monitoring and logging approach
-        - Error handling strategies
-        - Deployment instructions
-        
-        b) reasoning.md
-        Must contain:
-        - Detailed service selection reasoning for EACH mainframe component
-        - Explicit justification for why each AWS service was chosen
-        - Alternative services considered and why they were not selected
-        - Trade-offs and compromises made in the design
-        - Consistency explanations for similar components
-        - Performance considerations
-        - Scalability analysis
-        - Operational complexity assessment
-        
-        8. CONSISTENCY REQUIREMENTS:
-        - Use identical service mappings for identical mainframe components
-        - Apply consistent naming conventions across all resources
-        - Maintain uniform documentation structure for all components
-        - Use standardized patterns for error handling and logging
-        - Apply consistent security controls across all services
-        - Document all assumptions made during analysis
-        - Provide the same level of detail for all components
-        
-        Please ensure each section is comprehensive and includes all relevant details for that service type. Include proper error handling, logging, monitoring, and follow AWS Well-Architected Framework principles throughout. Aim for maximum consistency in your analysis and recommendations across similar mainframe artifacts.
-  
   # DynamoDB Table for Job Tracking
   JobsTable:
     Type: AWS::DynamoDB::Table
@@ -260,8 +159,9 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - ssm:GetParameter
-                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mainframe-modernization/documentation-agent/*'
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "${PromptsS3Bucket.Arn}/*"
 
   # IAM Role for Step Functions
   StepFunctionsExecutionRole:
@@ -362,7 +262,6 @@ Resources:
         Variables:
           JOBS_TABLE_NAME: !Ref JobsTable
           MAX_COMBINED_CHARS: !Ref MaxCombinedChars
-          PARAMETER_STORE_PREFIX: !Ref ParameterStorePrefix
 
   ChunkingLambda:
     Type: AWS::Lambda::Function
@@ -404,7 +303,9 @@ Resources:
         Variables:
           JOBS_TABLE_NAME: !Ref JobsTable
           BEDROCK_MODEL_ID: !Ref BedrockModelId
-          PROMPT_TEMPLATE_PATH: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
+          PROMPTS_BUCKET: !Ref PromptsS3Bucket
+          TARGET_LANGUAGE: !Ref TargetLanguage
+          CACHE_TTL_SECONDS: "300"
 
   ResultAggregatorLambda:
     Type: AWS::Lambda::Function
@@ -424,7 +325,10 @@ Resources:
       Environment:
         Variables:
           JOBS_TABLE_NAME: !Ref JobsTable
-          PROMPT_TEMPLATE_PATH: !Sub /mainframe-modernization/documentation-agent/${Environment}/updated-prompt
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          PROMPTS_BUCKET: !Ref PromptsS3Bucket
+          TARGET_LANGUAGE: !Ref TargetLanguage
+          CACHE_TTL_SECONDS: "300"
 
   AnalysisLambda:
     Type: AWS::Lambda::Function
@@ -445,6 +349,9 @@ Resources:
         Variables:
           JOBS_TABLE_NAME: !Ref JobsTable
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          PROMPTS_BUCKET: !Ref PromptsS3Bucket
+          TARGET_LANGUAGE: !Ref TargetLanguage
+          CACHE_TTL_SECONDS: "300"
 
   StatusLambda:
     Type: AWS::Lambda::Function
@@ -1007,3 +914,7 @@ Outputs:
   JobsTableName:
     Description: Name of the DynamoDB table for job tracking
     Value: !Ref JobsTable
+  
+  PromptsS3Bucket:
+    Description: Name of the S3 bucket for storing prompts
+    Value: !Ref PromptsS3Bucket

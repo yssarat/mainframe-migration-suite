@@ -9,7 +9,7 @@ set -e
 # Default values
 ENVIRONMENT="dev"
 REGION=$(aws configure get region)
-PLATFORM_STACK_NAME="mainframe-modernization-platform"
+PLATFORM_STACK_NAME=""  # Made mandatory - no default value
 PROFILE=""
 FORCE_DELETE="false"
 CLEAN_LOCAL_ONLY="false"
@@ -41,12 +41,14 @@ print_error() {
 
 # Function to show usage
 usage() {
-    echo "Usage: $0 [OPTIONS]"
+    echo "Usage: $0 --stack-name STACK_NAME [OPTIONS]"
+    echo ""
+    echo "Required:"
+    echo "  --stack-name STACK_NAME   Platform stack name (REQUIRED for safety)"
     echo ""
     echo "Options:"
     echo "  --env ENVIRONMENT          Environment (dev, staging, prod) [default: dev]"
     echo "  --region REGION           AWS region [default: from AWS CLI config]"
-    echo "  --stack-name STACK_NAME   Platform stack name [default: mainframe-modernization-platform]"
     echo "  --profile PROFILE         AWS profile to use"
     echo "  --force                   Skip confirmation prompts"
     echo "  --local-only              Clean only local files (skip AWS resources)"
@@ -54,10 +56,12 @@ usage() {
     echo "  --help                    Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --env dev --region us-east-1"
-    echo "  $0 --env prod --region us-west-2 --profile production"
-    echo "  $0 --local-only           # Clean only local artifacts"
-    echo "  $0 --aws-only --force     # Clean only AWS resources without prompts"
+    echo "  $0 --stack-name mainframe-modernization-platform --env dev --region us-east-1"
+    echo "  $0 --stack-name my-custom-stack --env prod --region us-west-2 --profile production"
+    echo "  $0 --stack-name test-stack --local-only           # Clean only local artifacts"
+    echo "  $0 --stack-name prod-stack --aws-only --force     # Clean only AWS resources without prompts"
+    echo ""
+    echo "⚠️  SAFETY NOTE: Stack name is required to prevent accidental deletion of wrong resources"
 }
 
 # Parse command line arguments
@@ -104,6 +108,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate inputs
+if [[ -z "$PLATFORM_STACK_NAME" ]]; then
+    print_error "Stack name is required for safety. Use --stack-name to specify the stack to clean up."
+    echo ""
+    usage
+    exit 1
+fi
+
 if [[ -z "$REGION" ]]; then
     print_error "AWS region not specified and not found in AWS CLI config"
     exit 1
@@ -191,7 +202,7 @@ delete_s3_bucket() {
     fi
 }
 
-# Function to delete CloudFormation stack
+# Function to delete CloudFormation stack with retry logic
 delete_cloudformation_stack() {
     local stack_name="$1"
     local aws_cmd="aws"
@@ -201,19 +212,87 @@ delete_cloudformation_stack() {
     fi
     
     # Check if stack exists
-    if $aws_cmd cloudformation describe-stacks --stack-name "$stack_name" --region "$REGION" >/dev/null 2>&1; then
-        print_status "Deleting CloudFormation stack: $stack_name"
+    if ! $aws_cmd cloudformation describe-stacks --stack-name "$stack_name" --region "$REGION" >/dev/null 2>&1; then
+        print_status "CloudFormation stack does not exist: $stack_name"
+        return 0
+    fi
+    
+    print_status "Deleting CloudFormation stack: $stack_name"
+    
+    # First attempt: Normal deletion
+    $aws_cmd cloudformation delete-stack --stack-name "$stack_name" --region "$REGION"
+    
+    print_status "Waiting for stack deletion to complete (timeout: 20 minutes)..."
+    if $aws_cmd cloudformation wait stack-delete-complete --stack-name "$stack_name" --region "$REGION" 2>/dev/null; then
+        print_success "Deleted CloudFormation stack: $stack_name"
+        return 0
+    fi
+    
+    # Check if stack deletion failed
+    local stack_status=$($aws_cmd cloudformation describe-stacks --stack-name "$stack_name" --region "$REGION" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DELETED")
+    
+    if [[ "$stack_status" == "DELETE_FAILED" ]]; then
+        print_warning "Stack deletion failed. Attempting to retry with resource cleanup..."
         
+        # Get failed resources
+        local failed_resources=$($aws_cmd cloudformation describe-stack-events --stack-name "$stack_name" --region "$REGION" \
+            --query "StackEvents[?ResourceStatus=='DELETE_FAILED'].{LogicalId:LogicalResourceId,Type:ResourceType,Reason:ResourceStatusReason}" \
+            --output table 2>/dev/null || echo "")
+        
+        if [[ -n "$failed_resources" ]]; then
+            print_warning "Failed to delete the following resources:"
+            echo "$failed_resources"
+        fi
+        
+        # Try to delete nested stacks individually
+        print_status "Attempting to delete nested stacks individually..."
+        delete_nested_stacks "$stack_name"
+        
+        # Retry main stack deletion
+        print_status "Retrying main stack deletion..."
         $aws_cmd cloudformation delete-stack --stack-name "$stack_name" --region "$REGION"
         
-        print_status "Waiting for stack deletion to complete..."
-        $aws_cmd cloudformation wait stack-delete-complete --stack-name "$stack_name" --region "$REGION" || {
-            print_warning "Stack deletion may have failed or timed out. Check AWS console for details."
-        }
-        
-        print_success "Deleted CloudFormation stack: $stack_name"
+        if $aws_cmd cloudformation wait stack-delete-complete --stack-name "$stack_name" --region "$REGION" 2>/dev/null; then
+            print_success "Successfully deleted CloudFormation stack on retry: $stack_name"
+        else
+            print_error "Failed to delete CloudFormation stack: $stack_name"
+            print_warning "Manual cleanup may be required. Check AWS Console for details."
+            return 1
+        fi
+    elif [[ "$stack_status" == "DELETED" ]] || [[ "$stack_status" == "" ]]; then
+        print_success "CloudFormation stack deleted: $stack_name"
     else
-        print_status "CloudFormation stack does not exist: $stack_name"
+        print_warning "Stack is in unexpected state: $stack_status"
+    fi
+}
+
+# Function to delete nested stacks
+delete_nested_stacks() {
+    local parent_stack="$1"
+    local aws_cmd="aws"
+    
+    if [[ -n "$PROFILE" ]]; then
+        aws_cmd="aws --profile $PROFILE"
+    fi
+    
+    # Get nested stacks
+    local nested_stacks=$($aws_cmd cloudformation describe-stack-resources --stack-name "$parent_stack" --region "$REGION" \
+        --query "StackResources[?ResourceType=='AWS::CloudFormation::Stack'].PhysicalResourceId" --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$nested_stacks" ]]; then
+        for nested_stack in $nested_stacks; do
+            if [[ "$nested_stack" != "None" ]] && [[ -n "$nested_stack" ]]; then
+                print_status "Deleting nested stack: $nested_stack"
+                $aws_cmd cloudformation delete-stack --stack-name "$nested_stack" --region "$REGION" 2>/dev/null || true
+                
+                # Don't wait for nested stacks to avoid timeout
+                print_status "Initiated deletion of nested stack: $nested_stack"
+            fi
+        done
+        
+        # Wait a bit for nested stacks to start deletion
+        print_status "Waiting 30 seconds for nested stack deletions to process..."
+        sleep 30
     fi
 }
 
@@ -321,6 +400,7 @@ clean_aws_resources() {
     CFN_LAMBDA_BUCKET="cfn-generator-${ENVIRONMENT}-${ACCOUNT_ID}-${REGION}"
     ANALYZER_LAMBDA_BUCKET="mainframe-analyzer-${ENVIRONMENT}-${ACCOUNT_ID}-${REGION}"
     TRANSFORM_BUCKET="mainframe-transform-${ENVIRONMENT}-${ACCOUNT_ID}"
+    PROMPTS_BUCKET="mainframe-modernization-prompts-${ENVIRONMENT}-${ACCOUNT_ID}"
     
     print_status "Resources to be deleted:"
     print_status "- CloudFormation Stack: $STACK_NAME"
@@ -329,20 +409,28 @@ clean_aws_resources() {
     print_status "  - $CFN_LAMBDA_BUCKET"
     print_status "  - $ANALYZER_LAMBDA_BUCKET"
     print_status "  - $TRANSFORM_BUCKET"
+    print_status "  - $PROMPTS_BUCKET"
     print_status "- Bedrock Agents (matching pattern)"
     echo ""
     
-    # Delete CloudFormation stack first (this will delete most resources)
+    # Delete Bedrock agents FIRST (before stack deletion)
+    print_status "Step 1: Cleaning up Bedrock agents (before stack deletion)..."
+    delete_bedrock_agents
+    
+    # Delete CloudFormation stack (this will delete most resources)
+    print_status "Step 2: Deleting CloudFormation stack..."
     delete_cloudformation_stack "$STACK_NAME"
     
     # Delete S3 buckets (these might not be deleted by CloudFormation if they contain objects)
-    print_status "Deleting S3 buckets..."
+    print_status "Step 3: Deleting S3 buckets..."
     delete_s3_bucket "$TEMPLATE_BUCKET"
     delete_s3_bucket "$CFN_LAMBDA_BUCKET"
     delete_s3_bucket "$ANALYZER_LAMBDA_BUCKET"
     delete_s3_bucket "$TRANSFORM_BUCKET"
+    delete_s3_bucket "$PROMPTS_BUCKET"
     
-    # Delete Bedrock agents
+    # Final cleanup of any remaining Bedrock agents
+    print_status "Step 4: Final Bedrock agent cleanup..."
     delete_bedrock_agents
     
     print_success "AWS resources cleaned"

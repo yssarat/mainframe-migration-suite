@@ -1,0 +1,380 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Mainframe Analyzer Service - S3-based prompt management with multi-language support'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Environment name
+  
+  TargetLanguage:
+    Type: String
+    Default: python
+    AllowedValues: [python, java, dotnet, csharp]
+    Description: Target programming language for generated artifacts
+  
+  CacheTTLSeconds:
+    Type: Number
+    Default: 300
+    Description: Cache TTL in seconds for prompt caching
+  
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-3-7-sonnet-20250219-v1:0
+    Description: Bedrock model ID for AI processing
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 900
+    MemorySize: 1024
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        PROMPTS_BUCKET: !Ref PromptsS3Bucket
+        TARGET_LANGUAGE: !Ref TargetLanguage
+        CACHE_TTL_SECONDS: !Ref CacheTTLSeconds
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        JOBS_TABLE_NAME: !Ref JobsTable
+
+Resources:
+  # S3 Bucket for Prompt Storage
+  PromptsS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "mainframe-prompts-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+      NotificationConfiguration:
+        CloudWatchConfigurations:
+          - Event: s3:ObjectCreated:*
+            CloudWatchConfiguration:
+              LogGroupName: !Sub "/aws/s3/${AWS::StackName}-prompts"
+
+  # S3 Bucket for Document Storage
+  DocumentsS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "mainframe-docs-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # DynamoDB Table for Job Tracking
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "MainframeAnalyzer-Jobs-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  # IAM Role for Lambda Functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "MainframeAnalyzer-Lambda-Role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "${PromptsS3Bucket}/*"
+                  - !Ref PromptsS3Bucket
+                  - !Sub "${DocumentsS3Bucket}/*"
+                  - !Ref DocumentsS3Bucket
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "${DocumentsS3Bucket}/*"
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt JobsTable.Arn
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # Lambda Layer for Shared Code
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "mainframe-analyzer-shared-${Environment}"
+      Description: Shared code for Mainframe Analyzer Lambda functions
+      ContentUri: ../src/shared/
+      CompatibleRuntimes:
+        - python3.9
+      RetentionPolicy: Delete
+
+  # Initial Lambda Function
+  InitialLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "MainframeAnalyzer-Initial-${Environment}"
+      CodeUri: ../src/initial-lambda/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          JOBS_TABLE_NAME: !Ref JobsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /analyze
+            Method: post
+
+  # Aggregate Lambda Function
+  AggregateLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "MainframeAnalyzer-Aggregate-${Environment}"
+      CodeUri: ../src/aggregate-lambda/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          JOBS_TABLE_NAME: !Ref JobsTable
+
+  # Analysis Lambda Function
+  AnalysisLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "MainframeAnalyzer-Analysis-${Environment}"
+      CodeUri: ../src/analysis-lambda/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          PROMPTS_BUCKET: !Ref PromptsS3Bucket
+          TARGET_LANGUAGE: !Ref TargetLanguage
+          CACHE_TTL_SECONDS: !Ref CacheTTLSeconds
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          JOBS_TABLE_NAME: !Ref JobsTable
+
+  # Chunk Processor Lambda Function
+  ChunkProcessorLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "MainframeAnalyzer-ChunkProcessor-${Environment}"
+      CodeUri: ../src/chunk-processor-lambda/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          PROMPTS_BUCKET: !Ref PromptsS3Bucket
+          TARGET_LANGUAGE: !Ref TargetLanguage
+          CACHE_TTL_SECONDS: !Ref CacheTTLSeconds
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          JOBS_TABLE_NAME: !Ref JobsTable
+
+  # Status Lambda Function
+  StatusLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "MainframeAnalyzer-Status-${Environment}"
+      CodeUri: ../src/status-lambda/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          JOBS_TABLE_NAME: !Ref JobsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /status/{job_id}
+            Method: get
+
+  # Step Functions State Machine
+  AnalysisStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "MainframeAnalyzer-StateMachine-${Environment}"
+      DefinitionUri: ../statemachine/analysis.asl.json
+      DefinitionSubstitutions:
+        InitialLambdaArn: !GetAtt InitialLambda.Arn
+        AggregateLambdaArn: !GetAtt AggregateLambda.Arn
+        AnalysisLambdaArn: !GetAtt AnalysisLambda.Arn
+        ChunkProcessorLambdaArn: !GetAtt ChunkProcessorLambda.Arn
+        StatusLambdaArn: !GetAtt StatusLambda.Arn
+      Role: !GetAtt StepFunctionsRole.Arn
+
+  # IAM Role for Step Functions
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "MainframeAnalyzer-StepFunctions-Role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt InitialLambda.Arn
+                  - !GetAtt AggregateLambda.Arn
+                  - !GetAtt AnalysisLambda.Arn
+                  - !GetAtt ChunkProcessorLambda.Arn
+                  - !GetAtt StatusLambda.Arn
+
+  # CloudWatch Log Groups
+  InitialLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/MainframeAnalyzer-Initial-${Environment}"
+      RetentionInDays: 14
+
+  AggregateLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/MainframeAnalyzer-Aggregate-${Environment}"
+      RetentionInDays: 14
+
+  AnalysisLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/MainframeAnalyzer-Analysis-${Environment}"
+      RetentionInDays: 14
+
+  ChunkProcessorLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/MainframeAnalyzer-ChunkProcessor-${Environment}"
+      RetentionInDays: 14
+
+  StatusLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/MainframeAnalyzer-Status-${Environment}"
+      RetentionInDays: 14
+
+Outputs:
+  PromptsS3Bucket:
+    Description: S3 bucket for storing prompts
+    Value: !Ref PromptsS3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-PromptsS3Bucket"
+
+  DocumentsS3Bucket:
+    Description: S3 bucket for storing documents
+    Value: !Ref DocumentsS3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-DocumentsS3Bucket"
+
+  JobsTableName:
+    Description: DynamoDB table for job tracking
+    Value: !Ref JobsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-JobsTable"
+
+  AnalysisStateMachineArn:
+    Description: Step Functions state machine ARN
+    Value: !Ref AnalysisStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-StateMachine"
+
+  ApiGatewayUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiUrl"

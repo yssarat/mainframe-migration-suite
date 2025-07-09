@@ -210,6 +210,7 @@ TEMPLATE_BUCKET="mainframe-modernization-templates-${ACCOUNT_ID}-${REGION}"
 CFN_LAMBDA_BUCKET="cfn-generator-${ENVIRONMENT}-${ACCOUNT_ID}-${REGION}"
 ANALYZER_LAMBDA_BUCKET="mainframe-analyzer-${ENVIRONMENT}-${ACCOUNT_ID}-${REGION}"
 TRANSFORM_BUCKET="mainframe-transform-${ENVIRONMENT}-${ACCOUNT_ID}"
+PROMPTS_BUCKET="mainframe-modernization-prompts-${ENVIRONMENT}-${ACCOUNT_ID}"
 
 # Delete existing buckets to prevent conflicts (if cleanup enabled)
 if [[ "$CLEAN_BUCKETS" == "true" ]]; then
@@ -219,6 +220,8 @@ if [[ "$CLEAN_BUCKETS" == "true" ]]; then
     delete_s3_bucket "$ANALYZER_LAMBDA_BUCKET"
     # Note: We'll recreate the transform bucket but preserve the layer
     delete_s3_bucket "$TRANSFORM_BUCKET"
+    # Delete the prompts bucket created by CloudFormation
+    delete_s3_bucket "$PROMPTS_BUCKET"
     
     # Create fresh buckets
     print_status "Creating fresh S3 buckets..."
@@ -398,9 +401,26 @@ if [[ -d "services/mainframe-analyzer/src" ]]; then
         for dir in */; do
             if [[ -f "${dir}lambda_function.py" ]]; then
                 print_status "Packaging ${dir%/} Lambda function..."
-                cd "$dir"
-                zip -r "../../dist/${dir%/}.zip" . >/dev/null 2>&1
-                cd ..
+                # Create a temporary directory for packaging
+                TEMP_DIR="/tmp/lambda_package_${dir%/}_$$"
+                mkdir -p "$TEMP_DIR"
+                
+                # Copy the Lambda function files
+                cp -r "$dir"* "$TEMP_DIR/"
+                
+                # Copy the shared directory if it exists and the Lambda function imports it
+                if [[ -d "shared" ]] && grep -q "from shared" "${dir}lambda_function.py" 2>/dev/null; then
+                    cp -r shared "$TEMP_DIR/"
+                fi
+                
+                # Create the zip package from the current directory
+                CURRENT_DIR=$(pwd)
+                cd "$TEMP_DIR"
+                zip -r "$CURRENT_DIR/../dist/${dir%/}.zip" . >/dev/null 2>&1
+                cd "$CURRENT_DIR"
+                
+                # Cleanup
+                rm -rf "$TEMP_DIR"
             fi
         done
         cd ..
@@ -547,6 +567,10 @@ else
             get_failed_resources "$STACK_NAME"
             
             print_error ""
+            print_error "Checking IAM permissions:"
+            aws iam get-user --profile "${PROFILE:-}" || print_error "Unable to get IAM user information"
+            
+            print_error ""
             print_error "To get more details, run:"
             print_error "aws cloudformation describe-stack-events --stack-name $STACK_NAME --region $REGION --profile ${PROFILE:-}"
             ;;
@@ -589,6 +613,7 @@ echo "Templates: ${TEMPLATE_BUCKET}"
 echo "CFN Generator Lambda: ${CFN_LAMBDA_BUCKET}"
 echo "Mainframe Analyzer Lambda: ${ANALYZER_LAMBDA_BUCKET}"
 echo "Transform Data: ${TRANSFORM_BUCKET}"
+echo "AI Prompts: ${PROMPTS_BUCKET}"
 echo ""
 echo "=== BEDROCK AGENTS ==="
 echo "Supervisor Agent ID: $SUPERVISOR_AGENT_ID"
@@ -611,6 +636,64 @@ echo "• s3://${TRANSFORM_BUCKET}/sample-docs/CBACT01C-cbl-0.4.4.pdf (COBOL pro
 echo "• s3://${TRANSFORM_BUCKET}/sample-docs/READACCT-jcl-0.4.4.pdf (JCL job)"
 echo ""
 print_success "Platform deployment completed successfully!"
+
+# Upload AI prompts to the prompts bucket
+print_status "Uploading AI prompts to S3..."
+upload_prompts_to_s3() {
+    local prompts_dir="./prompts"
+    
+    if [ ! -d "$prompts_dir" ]; then
+        print_warning "Prompts directory not found: $prompts_dir"
+        return 1
+    fi
+    
+    print_status "Uploading analysis-agent prompts (shared by Analysis & Chunk Processor Lambda functions)..."
+    
+    # Upload analysis agent prompts
+    aws s3 cp "$prompts_dir/analysis-agent/python-prompt.txt" "s3://$PROMPTS_BUCKET/analysis-agent/python-prompt.txt" \
+        --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+        print_warning "Failed to upload python-prompt.txt"
+    }
+    
+    aws s3 cp "$prompts_dir/analysis-agent/dotnet-prompt.txt" "s3://$PROMPTS_BUCKET/analysis-agent/dotnet-prompt.txt" \
+        --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+        print_warning "Failed to upload dotnet-prompt.txt"
+    }
+    
+    aws s3 cp "$prompts_dir/analysis-agent/java-prompt.txt" "s3://$PROMPTS_BUCKET/analysis-agent/java-prompt.txt" \
+        --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+        print_warning "Failed to upload java-prompt.txt"
+    }
+    
+    aws s3 cp "$prompts_dir/analysis-agent/go-prompt.txt" "s3://$PROMPTS_BUCKET/analysis-agent/go-prompt.txt" \
+        --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+        print_warning "Failed to upload go-prompt.txt"
+    }
+    
+    aws s3 cp "$prompts_dir/analysis-agent/javascript-prompt.txt" "s3://$PROMPTS_BUCKET/analysis-agent/javascript-prompt.txt" \
+        --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+        print_warning "Failed to upload javascript-prompt.txt"
+    }
+    
+    aws s3 cp "$prompts_dir/analysis-agent/default-prompt.txt" "s3://$PROMPTS_BUCKET/analysis-agent/default-prompt.txt" \
+        --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+        print_warning "Failed to upload default-prompt.txt"
+    }
+    
+    # Upload template files if they exist
+    if [ -d "$prompts_dir/templates" ]; then
+        print_status "Uploading template files..."
+        aws s3 sync "$prompts_dir/templates/" "s3://$PROMPTS_BUCKET/templates/" \
+            --content-type "text/plain" --region "$REGION" --profile "${PROFILE:-}" || {
+            print_warning "Failed to upload template files"
+        }
+    fi
+    
+    print_success "AI prompts uploaded successfully to: s3://$PROMPTS_BUCKET/"
+}
+
+# Call the prompt upload function
+upload_prompts_to_s3
 
 # Upload sample mainframe documentation files for testing
 print_status "Uploading sample mainframe documentation files for testing..."

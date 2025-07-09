@@ -1,0 +1,476 @@
+You are an expert AWS architect specializing in mainframe modernization with deep expertise in Python development.
+
+CRITICAL: Generate complete, production-ready AWS artifacts for Python-based solutions in this EXACT structure, including architecture.md and readme.md files:
+
+## LAMBDA_FUNCTIONS
+### [function_name].py
+```python
+import json
+import boto3
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Main Lambda handler for mainframe modernization processing
+    """
+    try:
+        logger.info(f"Processing event: {json.dumps(event, default=str)}")
+        
+        # Your Python implementation here
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Processing completed successfully',
+                'timestamp': datetime.utcnow().isoformat()
+            })
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing request: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'error': str(e),
+                'timestamp': datetime.utcnow().isoformat()
+            })
+        }
+```
+
+## IAM_ROLES
+### [role_name].json
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::mainframe-modernization-bucket/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query"
+      ],
+      "Resource": "arn:aws:dynamodb:*:*:table/MainframeModernization*"
+    }
+  ]
+}
+```
+
+## STEP_FUNCTIONS
+### [workflow_name].json
+```json
+{
+  "Comment": "Mainframe modernization workflow with Python Lambda functions",
+  "StartAt": "ProcessMainframeData",
+  "States": {
+    "ProcessMainframeData": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MainframeProcessor",
+      "Parameters": {
+        "input.$": "$",
+        "language": "python"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleError",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "TransformData"
+    },
+    "TransformData": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:DataTransformer",
+      "Parameters": {
+        "data.$": "$.processedData",
+        "transformationType": "mainframe-to-cloud"
+      },
+      "End": true
+    },
+    "HandleError": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ErrorHandler",
+      "Parameters": {
+        "error.$": "$.error",
+        "originalInput.$": "$"
+      },
+      "End": true
+    }
+  }
+}
+```
+
+## DYNAMODB
+### [table_name].json
+```json
+{
+  "TableName": "MainframeModernizationJobs",
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    {
+      "AttributeName": "job_id",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "created_at",
+      "AttributeType": "S"
+    }
+  ],
+  "KeySchema": [
+    {
+      "AttributeName": "job_id",
+      "KeyType": "HASH"
+    }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "CreatedAtIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "created_at",
+          "KeyType": "HASH"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    }
+  ],
+  "StreamSpecification": {
+    "StreamEnabled": true,
+    "StreamViewType": "NEW_AND_OLD_IMAGES"
+  },
+  "PointInTimeRecoverySpecification": {
+    "PointInTimeRecoveryEnabled": true
+  },
+  "SSESpecification": {
+    "SSEEnabled": true
+  },
+  "Tags": [
+    {
+      "Key": "Project",
+      "Value": "MainframeModernization"
+    },
+    {
+      "Key": "Language",
+      "Value": "Python"
+    }
+  ]
+}
+```
+
+## ARCHITECTURE_DIAGRAM
+### architecture.md
+```ascii
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           MAINFRAME MODERNIZATION PLATFORM                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
+│  │   MAINFRAME     │    │      AWS        │    │    BUSINESS     │             │
+│  │   DATA FILES    │───▶│   PROCESSING    │───▶│   APPLICATIONS  │             │
+│  │                 │    │    LAYER        │    │                 │             │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
+│           │                       │                       │                     │
+│           │                       │                       │                     │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
+│  │   S3 INPUT      │    │     LAMBDA      │    │    DYNAMODB     │             │
+│  │   BUCKET        │───▶│   FUNCTIONS     │───▶│    TABLES       │             │
+│  │                 │    │                 │    │                 │             │
+│  │ • VSAM Files    │    │ • Converter     │    │ • Account Data  │             │
+│  │ • Event Trigger │    │ • Processor     │    │ • Job Status    │             │
+│  │ • Versioning    │    │ • Generator     │    │                 │             │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
+│           │                       │                       │                     │
+│           │              ┌─────────────────┐              │                     │
+│           │              │  STEP FUNCTIONS │              │                     │
+│           └─────────────▶│   WORKFLOWS     │◀─────────────┘                     │
+│                          │                 │                                    │
+│                          │ • VSAM Conv.    │                                    │
+│                          │ • Account Proc. │                                    │
+│                          └─────────────────┘                                    │
+│                                   │                                             │
+│                          ┌─────────────────┐                                    │
+│                          │   S3 OUTPUT     │                                    │
+│                          │    BUCKET       │                                    │
+│                          │                 │                                    │
+│                          │ • Standard      │                                    │
+│                          │ • Array         │                                    │
+│                          │ • Variable      │                                    │
+│                          └─────────────────┘                                    │
+│                                   │                                             │
+│                          ┌─────────────────┐                                    │
+│                          │ NOTIFICATIONS   │                                    │
+│                          │                 │                                    │
+│                          │ • SNS Topics    │                                    │
+│                          │ • CloudWatch    │                                    │
+│                          │                 │                                    │
+│                          └─────────────────┘                                    │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## README
+### readme.md
+```markdown
+## Executive Summary of the Modernization Approach
+
+This document outlines the modernization approach for migrating the CBACT01C mainframe batch program to AWS. The program reads account records from an indexed file, processes the data, and writes the processed information into multiple output files with different formats. The modernization strategy focuses on creating a serverless, event-driven architecture that maintains the core business logic while leveraging AWS services for improved scalability, reliability, and cost efficiency.
+
+
+### Implementation Roadmap and Dependencies
+
+1. **Infrastructure Setup (Week 1)**
+   - Create S3 buckets for input and output files
+   - Configure IAM roles and policies
+   - Set up CloudWatch logging and monitoring
+
+2. **Core Processing Implementation (Week 2)**
+   - Develop Lambda function for account data processing
+   - Implement data transformation logic
+   - Create output file generation modules
+
+3. **Integration and Event Configuration (Week 3)**
+   - Configure S3 event notifications
+   - Set up error handling and retry mechanisms
+   - Implement monitoring and alerting
+
+4. **Testing and Validation (Week 4)**
+   - Perform unit and integration testing
+   - Validate data transformation accuracy
+   - Test error handling and recovery
+
+5. **Deployment and Cutover (Week 5)**
+   - Deploy to production environment
+   - Perform parallel runs with mainframe system
+   - Monitor performance and make adjustments
+
+### Data Flow Descriptions
+
+1. **Input Processing**
+   - Account data files are uploaded to the input S3 bucket
+   - S3 event notification triggers the Lambda function
+   - Lambda function reads and validates the input data
+
+2. **Data Transformation**
+   - Lambda function processes account records according to business rules
+   - Performs data transformations and calculations
+   - Handles special cases (e.g., default values for zero amounts)
+
+3. **Output Generation**
+   - Creates three different output formats:
+     - Fixed-length records (equivalent to OUT-FILE)
+     - Array-structured records (equivalent to ARRY-FILE)
+     - Variable-length records (equivalent to VBRC-FILE)
+   - Writes output files to the designated S3 bucket
+
+### Security Considerations
+
+- **Data Protection**
+  - S3 buckets configured with server-side encryption
+  - Data in transit protected with TLS
+  - Bucket policies to restrict access
+
+- **Access Control**
+  - IAM roles with least privilege permissions
+  - Resource-based policies for S3 buckets
+  - Secure Lambda execution environment
+
+- **Monitoring and Auditing**
+  - CloudTrail for API activity logging
+  - CloudWatch for operational monitoring
+  - S3 access logging enabled
+
+### Cost Optimization Strategies
+
+- **Serverless Architecture**
+  - Pay-only-for-what-you-use Lambda execution
+  - No idle infrastructure costs
+
+- **Storage Optimization**
+  - S3 lifecycle policies for output file management
+  - S3 storage class selection based on access patterns
+
+- **Operational Efficiency**
+  - Automated error handling reduces manual intervention
+  - Event-driven architecture eliminates polling costs
+
+### Monitoring and Logging Approach
+
+- **Lambda Function Monitoring**
+  - CloudWatch metrics for invocation count, duration, and errors
+  - Custom metrics for business-specific KPIs
+
+- **Comprehensive Logging**
+  - Structured logging with consistent format
+  - Log levels for different severity of events
+  - Log retention policies aligned with business requirements
+
+- **Alerting**
+  - CloudWatch alarms for error thresholds
+  - SNS notifications for critical failures
+  - Dashboard for operational visibility
+
+### Error Handling Strategies
+
+- **Input Validation**
+  - Validate file format and content before processing
+  - Reject and notify on invalid input
+
+- **Processing Errors**
+  - Graceful handling of business rule exceptions
+  - Detailed error messages with context
+
+- **System Failures**
+  - Automatic retries for transient failures
+  - Dead-letter queue for persistent failures
+  - Comprehensive error reporting
+
+### Deployment Instructions
+
+1. **Prerequisites**
+   - AWS CLI configured with appropriate permissions
+   - AWS SAM CLI installed for serverless deployment
+   - Python 3.9+ for Lambda development
+
+2. **Deployment Steps**
+   - Clone the repository
+   - Run `sam build` to build the application
+   - Run `sam deploy --guided` for interactive deployment
+   - Follow prompts to configure deployment parameters
+
+3. **Verification**
+   - Upload a test file to the input S3 bucket
+   - Verify Lambda execution in CloudWatch Logs
+   - Check output files in the output S3 bucket
+```
+
+### Key Components:
+- **Lambda Functions**: Process business logic with Python's rich ecosystem
+- **Step Functions**: Orchestrate complex workflows with error handling
+- **DynamoDB**: Store processed data with high performance and scalability
+- **S3**: Secure data storage with lifecycle management
+- **IAM Roles**: Secure access controls following least privilege principles
+
+## Python-Specific Features
+- **Virtual Environment**: Isolated dependencies for each function
+- **Requirements Management**: pip-based dependency management
+- **Logging**: Structured logging with AWS CloudWatch integration
+- **Testing**: Unit tests with pytest framework
+- **Code Quality**: Black formatting and flake8 linting
+
+## Deployment
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Deploy with SAM
+sam build
+sam deploy --guided
+```
+
+## Development
+```bash
+# Set up development environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest tests/
+
+# Format code
+black src/
+flake8 src/
+```
+
+## Security Considerations
+- All data encrypted at rest and in transit
+- IAM roles follow principle of least privilege
+- Python dependencies regularly updated for security patches
+- Secrets managed through AWS Secrets Manager
+```
+
+## REASONING
+### analysis.md
+```markdown
+# Analysis and Reasoning - Python Implementation
+
+## Python-Specific Architecture Decisions
+
+### Lambda Functions with Python 3.9+
+**Selection Reasoning**: Python was chosen for Lambda functions because:
+1. **Rich Ecosystem**: Extensive libraries for data processing (pandas, numpy)
+2. **AWS Integration**: Excellent boto3 SDK support
+3. **Rapid Development**: Fast prototyping and development cycles
+4. **Community Support**: Large community and extensive documentation
+5. **Serverless Optimization**: Python's startup time is suitable for Lambda
+
+### Data Processing Libraries
+**Selection Reasoning**: Python's data processing capabilities:
+1. **Pandas**: Efficient data manipulation and analysis
+2. **NumPy**: High-performance numerical computing
+3. **JSON/CSV Processing**: Native support for common data formats
+4. **Database Connectivity**: Multiple database drivers available
+
+### Error Handling Strategy
+**Python-Specific Approach**:
+1. **Exception Hierarchy**: Leveraging Python's exception system
+2. **Logging**: Structured logging with context managers
+3. **Retry Logic**: Exponential backoff with decorators
+4. **Graceful Degradation**: Fallback mechanisms for service failures
+
+## Integration Strategy
+This Python implementation integrates with AWS services through:
+- **Boto3 SDK**: Native AWS service integration
+- **Environment Variables**: Configuration management
+- **CloudWatch Logs**: Centralized logging and monitoring
+- **AWS X-Ray**: Distributed tracing for performance analysis
+
+## Performance Considerations
+- **Memory Optimization**: Efficient memory usage for large datasets
+- **Cold Start Mitigation**: Provisioned concurrency for critical functions
+- **Connection Pooling**: Reuse database connections across invocations
+- **Async Processing**: asyncio for concurrent operations where applicable
+
+## Security Best Practices
+- **Input Validation**: Comprehensive input sanitization
+- **Dependency Management**: Regular security updates
+- **Secrets Management**: AWS Secrets Manager integration
+- **Network Security**: VPC configuration for sensitive operations
+```
+
+Focus on Python best practices, AWS integration patterns, and mainframe modernization requirements. Ensure all code is production-ready with proper error handling, logging, and security considerations.

@@ -2,233 +2,95 @@
 
 ## Overview
 
-This guide provides comprehensive instructions for deploying the Mainframe Modernization Platform, which consists of three main components:
+This comprehensive guide walks you through deploying the Mainframe Modernization Platform in your AWS environment. The platform supports multiple deployment scenarios from development environments to enterprise production deployments.
 
-1. **Bedrock Agents** - AI orchestration layer with Supervisor, CFN Generator, and Mainframe Analyzer agents
-2. **CloudFormation Generator Service** - Converts resource configurations to CloudFormation templates
-3. **Mainframe Analyzer Service** - Analyzes mainframe documentation for modernization recommendations
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Quick Start Deployment](#quick-start-deployment)
+3. [Detailed Deployment Steps](#detailed-deployment-steps)
+4. [Configuration Options](#configuration-options)
+5. [Environment-Specific Deployments](#environment-specific-deployments)
+6. [Post-Deployment Verification](#post-deployment-verification)
+7. [Troubleshooting](#troubleshooting)
+8. [Maintenance and Updates](#maintenance-and-updates)
 
 ## Prerequisites
 
-### AWS Account Requirements
-- AWS Account with appropriate permissions
-- AWS CLI installed and configured
-- Permissions to create:
-  - Lambda functions
-  - Step Functions
-  - DynamoDB tables
-  - S3 buckets
-  - IAM roles and policies
-  - Bedrock agents
-  - CloudFormation stacks
+### 1. AWS Account Requirements
 
-### Local Environment
-- Python 3.9 or higher
-- Git
-- Bash shell (for deployment scripts)
+#### Account Setup
+- **AWS Account** with administrative access
+- **AWS CLI v2.0+** installed and configured
+- **Billing alerts** enabled for cost monitoring
+- **Service quotas** verified for required services
 
-### AWS CLI Configuration
+#### Required AWS Services
+Ensure the following services are available in your target region:
+- Amazon Bedrock (with Claude models enabled)
+- AWS Lambda
+- Amazon S3
+- Amazon DynamoDB
+- AWS Step Functions
+- AWS Systems Manager Parameter Store
+- Amazon CloudWatch
+- AWS X-Ray (optional but recommended)
+
+#### Service Quotas to Verify
 ```bash
-# Configure AWS CLI
+# Check Lambda concurrent executions limit
+aws service-quotas get-service-quota \
+  --service-code lambda \
+  --quota-code L-B99A9384
+
+# Check Bedrock model access
+aws bedrock list-foundation-models \
+  --region us-east-1
+
+# Check Step Functions execution limit
+aws service-quotas get-service-quota \
+  --service-code states \
+  --quota-code L-1B91125E
+```
+
+### 2. Local Development Environment
+
+#### Required Tools
+```bash
+# Install AWS CLI v2
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# Install Python 3.9+
+python3 --version  # Should be 3.9 or higher
+
+# Install Git
+git --version
+
+# Install jq for JSON processing
+sudo apt-get install jq  # Ubuntu/Debian
+brew install jq          # macOS
+```
+
+#### AWS CLI Configuration
+```bash
+# Configure AWS credentials
 aws configure
+# AWS Access Key ID: [Your Access Key]
+# AWS Secret Access Key: [Your Secret Key]
+# Default region name: us-east-1
+# Default output format: json
 
 # Verify configuration
 aws sts get-caller-identity
 ```
 
-## Infrastructure Organization
+### 3. Permissions Requirements
 
-The platform uses a centralized infrastructure approach:
+#### IAM Policy for Deployment
+Create an IAM policy with the following permissions:
 
-```
-infrastructure/
-├── main.yaml                                    # Master deployment template
-├── combined-mainframe-modernization-agents.yaml # Bedrock agents
-├── cfn-generator-service.yaml                   # CFN Generator service
-└── mainframe-analyzer-service.yaml             # Mainframe Analyzer service
-```
-
-## Deployment Options
-
-### Option 1: Complete Platform Deployment (Recommended)
-
-Deploy all components with a single command:
-
-```bash
-cd mainframe-modernization-platform
-./scripts/deploy-all.sh --region us-east-1 --env dev
-```
-
-**Parameters:**
-- `--region`: AWS region (required)
-- `--env`: Environment (dev, staging, prod) [default: dev]
-- `--stack-name`: Custom stack name prefix [default: mainframe-modernization-platform]
-- `--profile`: AWS profile to use [optional]
-
-**Example:**
-```bash
-./scripts/deploy-all.sh \
-  --region us-west-2 \
-  --env prod \
-  --stack-name my-modernization-platform \
-  --profile production
-```
-
-### Option 2: Individual Service Deployment
-
-Deploy specific components independently:
-
-#### Deploy Bedrock Agents Only
-```bash
-./scripts/deploy-service.sh \
-  --service bedrock-agents \
-  --region us-east-1 \
-  --env dev
-```
-
-#### Deploy CFN Generator Service
-```bash
-./scripts/deploy-service.sh \
-  --service cfn-generator \
-  --region us-east-1 \
-  --env dev
-```
-
-#### Deploy Mainframe Analyzer Service
-```bash
-./scripts/deploy-service.sh \
-  --service mainframe-analyzer \
-  --region us-east-1 \
-  --env dev
-```
-
-### Option 3: Manual CloudFormation Deployment
-
-For advanced users who prefer direct CloudFormation control:
-
-```bash
-# Deploy master template
-aws cloudformation deploy \
-  --template-file infrastructure/main.yaml \
-  --stack-name mainframe-modernization-platform-dev \
-  --parameter-overrides \
-    Environment=dev \
-    FoundationModel=anthropic.claude-3-5-haiku-20241022-v1:0 \
-    DeployServices=both \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-1
-```
-
-## Deployment Process
-
-### Step 1: Pre-deployment Validation
-
-Run the validation script to check for issues:
-
-```bash
-./scripts/validate-deployment.sh
-```
-
-This script checks for:
-- Hardcoded account numbers
-- CloudFormation template validity
-- Required files and permissions
-- AWS CLI configuration
-
-### Step 2: Lambda Code Packaging
-
-The deployment scripts automatically handle Lambda code packaging, but you can also do it manually:
-
-```bash
-# CFN Generator Lambda functions
-cd services/cfn-generator
-./scripts/deploy.sh --package-only --env dev --region us-east-1
-
-# Mainframe Analyzer Lambda functions
-cd services/mainframe-analyzer
-./scripts/3.package-lambdas.sh --region us-east-1 --env dev
-```
-
-### Step 3: Infrastructure Deployment
-
-The deployment creates the following AWS resources:
-
-#### Bedrock Agents Stack
-- Supervisor Agent (coordinates between services)
-- CFN Generator Agent (handles template generation requests)
-- Mainframe Analyzer Agent (handles analysis requests)
-- Agent aliases and collaboration configuration
-
-#### CFN Generator Service Stack
-- Lambda functions (Initial, Generator, Validation, Completion, Status)
-- Step Functions workflow
-- DynamoDB table for job tracking
-- S3 bucket for templates and configurations
-- IAM roles and policies
-
-#### Mainframe Analyzer Service Stack
-- Lambda functions (Initial, ProcessFile, Aggregate, Analysis, Status, etc.)
-- Step Functions workflow with parallel processing
-- DynamoDB table for job tracking
-- S3 bucket for documents and results
-- IAM roles and policies
-
-### Step 4: Post-deployment Verification
-
-After deployment, verify the platform is working:
-
-```bash
-# Check stack status
-aws cloudformation describe-stacks \
-  --stack-name mainframe-modernization-platform-dev \
-  --region us-east-1
-
-# Test Bedrock agents
-# Navigate to Bedrock console > Agents > Test your supervisor agent
-```
-
-## Configuration Parameters
-
-### Environment-specific Settings
-
-The platform supports multiple environments with different configurations:
-
-```yaml
-# Development Environment
-Environment: dev
-FoundationModel: anthropic.claude-3-5-haiku-20241022-v1:0
-IdleSessionTTL: 600
-
-# Production Environment  
-Environment: prod
-FoundationModel: anthropic.claude-3-5-haiku-20241022-v1:0
-IdleSessionTTL: 1800
-```
-
-### Foundation Model Options
-
-Supported Bedrock foundation models:
-- `anthropic.claude-3-5-haiku-20241022-v1:0` (recommended, cost-effective)
-- `anthropic.claude-3-5-sonnet-20241022-v1:0` (higher capability)
-- `anthropic.claude-3-opus-20240229-v1:0` (highest capability)
-
-### Service Deployment Options
-
-Control which services to deploy:
-- `both` - Deploy all services (default)
-- `cfn-generator` - Deploy only CFN Generator
-- `mainframe-analyzer` - Deploy only Mainframe Analyzer  
-- `agents-only` - Deploy only Bedrock agents
-
-## Troubleshooting
-
-### Common Issues
-
-#### 1. Permission Errors
-```
-Error: User is not authorized to perform: bedrock:CreateAgent
-```
-**Solution:** Ensure your AWS user/role has the required permissions:
 ```json
 {
   "Version": "2012-10-17",
@@ -236,13 +98,23 @@ Error: User is not authorized to perform: bedrock:CreateAgent
     {
       "Effect": "Allow",
       "Action": [
-        "bedrock:*",
+        "cloudformation:*",
         "lambda:*",
-        "iam:*",
         "s3:*",
         "dynamodb:*",
         "states:*",
-        "cloudformation:*"
+        "ssm:*",
+        "bedrock:*",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PassRole",
+        "iam:GetRole",
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "logs:*",
+        "xray:*"
       ],
       "Resource": "*"
     }
@@ -250,123 +122,764 @@ Error: User is not authorized to perform: bedrock:CreateAgent
 }
 ```
 
-#### 2. Stack Already Exists
-```
-Error: Stack already exists
-```
-**Solution:** Update the existing stack or delete it first:
+## Quick Start Deployment
+
+### One-Command Deployment
+
+For a complete platform deployment with default settings:
+
 ```bash
-aws cloudformation delete-stack \
-  --stack-name mainframe-modernization-platform-dev \
+# Clone the repository
+git clone <repository-url>
+cd mainframe-modernization-platform-v3
+
+# Deploy everything with one command
+./scripts/deploy-all.sh --region us-east-1 --env dev
+
+# Expected output:
+# ✅ Validating prerequisites...
+# ✅ Deploying infrastructure...
+# ✅ Deploying CFN Generator service...
+# ✅ Deploying Mainframe Analyzer service...
+# ✅ Deploying Bedrock agents...
+# ✅ Uploading sample data...
+# ✅ Deployment completed successfully!
+```
+
+### Deployment Time Expectations
+- **Complete Platform**: 15-25 minutes
+- **Individual Services**: 5-10 minutes each
+- **Bedrock Agents**: 3-5 minutes
+
+## Detailed Deployment Steps
+
+### Step 1: Repository Setup
+
+```bash
+# Clone and navigate to the project
+git clone <repository-url>
+cd mainframe-modernization-platform-v3
+
+# Verify project structure
+ls -la
+# Expected directories:
+# - infrastructure/
+# - services/
+# - scripts/
+# - prompts/
+# - tests/
+# - docs/
+```
+
+### Step 2: Environment Configuration
+
+#### Create Environment Configuration File
+```bash
+# Create environment-specific configuration
+cat > config/dev.env << EOF
+# Environment Configuration
+ENVIRONMENT=dev
+AWS_REGION=us-east-1
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Service Configuration
+CFN_GENERATOR_MEMORY=2048
+MAINFRAME_ANALYZER_MEMORY=3008
+BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+
+# Storage Configuration
+S3_BUCKET_PREFIX=mainframe-transform
+DYNAMODB_BILLING_MODE=ON_DEMAND
+
+# Monitoring Configuration
+ENABLE_XRAY=true
+LOG_LEVEL=INFO
+EOF
+```
+
+#### Validate Configuration
+```bash
+# Run configuration validation
+./scripts/validate-config.sh --env dev
+
+# Expected output:
+# ✅ AWS credentials configured
+# ✅ Required services available
+# ✅ Service quotas sufficient
+# ✅ Configuration valid
+```
+
+### Step 3: Infrastructure Deployment
+
+#### Deploy Core Infrastructure
+```bash
+# Deploy the main infrastructure stack
+aws cloudformation deploy \
+  --template-file infrastructure/main.yaml \
+  --stack-name mainframe-modernization-dev \
+  --parameter-overrides \
+    Environment=dev \
+    BucketPrefix=mainframe-transform \
+  --capabilities CAPABILITY_IAM \
   --region us-east-1
+
+# Monitor deployment progress
+aws cloudformation describe-stacks \
+  --stack-name mainframe-modernization-dev \
+  --query 'Stacks[0].StackStatus'
 ```
 
-#### 3. Lambda Code Bucket Issues
-```
-Error: S3 bucket does not exist
-```
-**Solution:** The deployment scripts create buckets automatically. If issues persist:
+#### Verify Infrastructure Deployment
 ```bash
-# Manually create bucket
-aws s3 mb s3://cfn-generator-dev-$(aws sts get-caller-identity --query Account --output text)-us-east-1
+# Check S3 bucket creation
+aws s3 ls | grep mainframe-transform
+
+# Check DynamoDB table creation
+aws dynamodb list-tables | grep MainframeModernization
+
+# Check IAM roles creation
+aws iam list-roles | grep MainframeModernization
 ```
 
-#### 4. Bedrock Model Access
-```
-Error: Could not access foundation model
-```
-**Solution:** Enable model access in Bedrock console:
-1. Go to Bedrock console
-2. Navigate to Model access
-3. Enable access to Claude models
+### Step 4: Service Deployment
 
-### Debugging Steps
-
-1. **Check CloudFormation Events:**
+#### Deploy CFN Generator Service
 ```bash
+# Package Lambda functions
+cd services/cfn-generator
+zip -r cfn-generator-functions.zip src/
+
+# Deploy service stack
+aws cloudformation deploy \
+  --template-file ../../infrastructure/cfn-generator-service.yaml \
+  --stack-name cfn-generator-service-dev \
+  --parameter-overrides \
+    Environment=dev \
+    CodeBucket=mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text) \
+  --capabilities CAPABILITY_IAM
+
+cd ../..
+```
+
+#### Deploy Mainframe Analyzer Service
+```bash
+# Package Lambda functions
+cd services/mainframe-analyzer
+zip -r mainframe-analyzer-functions.zip src/
+
+# Deploy service stack
+aws cloudformation deploy \
+  --template-file ../../infrastructure/mainframe-analyzer-service.yaml \
+  --stack-name mainframe-analyzer-service-dev \
+  --parameter-overrides \
+    Environment=dev \
+    CodeBucket=mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text) \
+  --capabilities CAPABILITY_IAM
+
+cd ../..
+```
+
+### Step 5: Bedrock Agents Deployment
+
+#### Enable Bedrock Models
+```bash
+# Check available models
+aws bedrock list-foundation-models --region us-east-1
+
+# Enable Claude models (if not already enabled)
+# Note: This may require manual action in the AWS Console
+echo "Ensure Claude 3 Haiku and Claude 3 Sonnet models are enabled in Bedrock console"
+```
+
+#### Deploy Bedrock Agents
+```bash
+# Upload agent prompts to Parameter Store
+./scripts/upload-prompts.sh --env dev
+
+# Deploy Bedrock agents
+aws cloudformation deploy \
+  --template-file infrastructure/bedrock-agents.yaml \
+  --stack-name bedrock-agents-dev \
+  --parameter-overrides \
+    Environment=dev \
+  --capabilities CAPABILITY_IAM
+```
+
+### Step 6: Sample Data Upload
+
+```bash
+# Upload sample mainframe documents
+aws s3 cp tests/mainframe-docs/ \
+  s3://mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text)/sample-docs/ \
+  --recursive
+
+# Verify upload
+aws s3 ls s3://mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text)/sample-docs/
+```
+
+## Configuration Options
+
+### Environment Variables
+
+#### Lambda Function Configuration
+```yaml
+# In infrastructure templates
+Environment:
+  Variables:
+    LOG_LEVEL: !Ref LogLevel
+    BEDROCK_MODEL_ID: !Ref BedrockModelId
+    S3_BUCKET: !Ref S3Bucket
+    DYNAMODB_TABLE: !Ref DynamoDBTable
+    ENABLE_XRAY: !Ref EnableXRay
+```
+
+#### Parameter Store Configuration
+```bash
+# Set configuration parameters
+aws ssm put-parameter \
+  --name "/mainframe-modernization/cfn-generator/dev/bedrock-model-id" \
+  --value "anthropic.claude-3-sonnet-20240229-v1:0" \
+  --type "String"
+
+aws ssm put-parameter \
+  --name "/mainframe-modernization/mainframe-analyzer/dev/bedrock-model-id" \
+  --value "anthropic.claude-3-haiku-20240307-v1:0" \
+  --type "String"
+```
+
+### Resource Sizing Options
+
+#### Lambda Memory Configuration
+```yaml
+# Small deployment (development)
+LambdaMemoryConfig:
+  Initial: 1024
+  Processor: 2048
+  Analysis: 2048
+
+# Medium deployment (staging)
+LambdaMemoryConfig:
+  Initial: 1024
+  Processor: 3008
+  Analysis: 3008
+
+# Large deployment (production)
+LambdaMemoryConfig:
+  Initial: 1536
+  Processor: 3008
+  Analysis: 3008
+```
+
+#### DynamoDB Configuration
+```yaml
+# Development environment
+DynamoDBConfig:
+  BillingMode: ON_DEMAND
+  PointInTimeRecovery: false
+
+# Production environment
+DynamoDBConfig:
+  BillingMode: PROVISIONED
+  ReadCapacityUnits: 100
+  WriteCapacityUnits: 50
+  PointInTimeRecovery: true
+```
+
+## Environment-Specific Deployments
+
+### Development Environment
+
+#### Characteristics
+- Cost-optimized configuration
+- Minimal monitoring
+- Sample data included
+- Relaxed security settings
+
+#### Deployment Command
+```bash
+./scripts/deploy-all.sh \
+  --region us-east-1 \
+  --env dev \
+  --config-file config/dev.yaml \
+  --enable-samples true
+```
+
+#### Configuration File (config/dev.yaml)
+```yaml
+Environment: dev
+Region: us-east-1
+
+Lambda:
+  Memory:
+    Initial: 1024
+    Processor: 2048
+    Analysis: 2048
+  Timeout:
+    Initial: 300
+    Processor: 900
+    Analysis: 900
+
+DynamoDB:
+  BillingMode: ON_DEMAND
+  PointInTimeRecovery: false
+
+S3:
+  VersioningEnabled: false
+  LifecyclePolicies: true
+
+Monitoring:
+  XRayEnabled: false
+  DetailedMetrics: false
+  LogRetention: 7
+```
+
+### Staging Environment
+
+#### Characteristics
+- Production-like configuration
+- Enhanced monitoring
+- Performance testing ready
+- Security hardening
+
+#### Deployment Command
+```bash
+./scripts/deploy-all.sh \
+  --region us-east-1 \
+  --env staging \
+  --config-file config/staging.yaml \
+  --enable-monitoring true
+```
+
+#### Configuration File (config/staging.yaml)
+```yaml
+Environment: staging
+Region: us-east-1
+
+Lambda:
+  Memory:
+    Initial: 1024
+    Processor: 3008
+    Analysis: 3008
+  Timeout:
+    Initial: 300
+    Processor: 900
+    Analysis: 900
+  ReservedConcurrency:
+    Processor: 50
+    Analysis: 25
+
+DynamoDB:
+  BillingMode: ON_DEMAND
+  PointInTimeRecovery: true
+
+S3:
+  VersioningEnabled: true
+  LifecyclePolicies: true
+  CrossRegionReplication: false
+
+Monitoring:
+  XRayEnabled: true
+  DetailedMetrics: true
+  LogRetention: 30
+  AlarmsEnabled: true
+```
+
+### Production Environment
+
+#### Characteristics
+- High availability configuration
+- Comprehensive monitoring
+- Security hardening
+- Multi-region support (optional)
+
+#### Deployment Command
+```bash
+./scripts/deploy-all.sh \
+  --region us-east-1 \
+  --env prod \
+  --config-file config/prod.yaml \
+  --enable-monitoring true \
+  --enable-backup true
+```
+
+#### Configuration File (config/prod.yaml)
+```yaml
+Environment: prod
+Region: us-east-1
+
+Lambda:
+  Memory:
+    Initial: 1536
+    Processor: 3008
+    Analysis: 3008
+  Timeout:
+    Initial: 300
+    Processor: 900
+    Analysis: 900
+  ReservedConcurrency:
+    Processor: 100
+    Analysis: 50
+  ProvisionedConcurrency:
+    Initial: 5
+
+DynamoDB:
+  BillingMode: PROVISIONED
+  ReadCapacityUnits: 100
+  WriteCapacityUnits: 50
+  PointInTimeRecovery: true
+  BackupEnabled: true
+
+S3:
+  VersioningEnabled: true
+  LifecyclePolicies: true
+  CrossRegionReplication: true
+  ReplicationRegion: us-west-2
+
+Monitoring:
+  XRayEnabled: true
+  DetailedMetrics: true
+  LogRetention: 90
+  AlarmsEnabled: true
+  DashboardEnabled: true
+
+Security:
+  VPCEnabled: true
+  KMSEncryption: true
+  WAFEnabled: true
+```
+
+## Post-Deployment Verification
+
+### Automated Verification
+
+#### Run Deployment Validation Script
+```bash
+# Comprehensive deployment validation
+./scripts/validate-deployment.sh --env dev
+
+# Expected output:
+# ✅ Infrastructure stack deployed successfully
+# ✅ CFN Generator service operational
+# ✅ Mainframe Analyzer service operational
+# ✅ Bedrock agents configured correctly
+# ✅ Sample data uploaded successfully
+# ✅ All health checks passed
+```
+
+### Manual Verification Steps
+
+#### 1. Test CFN Generator Service
+```bash
+# Test CFN Generator via direct Lambda invocation
+aws lambda invoke \
+  --function-name CFNGenerator-Initial-dev \
+  --payload '{
+    "bucket_name": "mainframe-transform-dev-'$(aws sts get-caller-identity --query Account --output text)'",
+    "s3_folder": "sample-configs"
+  }' \
+  response.json
+
+# Check response
+cat response.json
+```
+
+#### 2. Test Mainframe Analyzer Service
+```bash
+# Test Mainframe Analyzer via direct Lambda invocation
+aws lambda invoke \
+  --function-name MainframeAnalyzer-Initial-dev \
+  --payload '{
+    "bucket_name": "mainframe-transform-dev-'$(aws sts get-caller-identity --query Account --output text)'",
+    "s3_folder": "sample-docs"
+  }' \
+  response.json
+
+# Check response
+cat response.json
+```
+
+#### 3. Test Bedrock Agents
+```bash
+# List deployed agents
+aws bedrock-agent list-agents --region us-east-1
+
+# Test agent via AWS Console
+echo "Navigate to Bedrock Console > Agents > Test your deployed Supervisor Agent"
+```
+
+#### 4. Verify Monitoring Setup
+```bash
+# Check CloudWatch log groups
+aws logs describe-log-groups \
+  --log-group-name-prefix "/aws/lambda/CFNGenerator"
+
+aws logs describe-log-groups \
+  --log-group-name-prefix "/aws/lambda/MainframeAnalyzer"
+
+# Check X-Ray traces (if enabled)
+aws xray get-trace-summaries \
+  --time-range-type TimeRangeByStartTime \
+  --start-time $(date -d '1 hour ago' -u +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S)
+```
+
+### Health Check Endpoints
+
+#### Create Health Check Function
+```python
+# health-check.py
+import boto3
+import json
+
+def check_service_health():
+    """Comprehensive health check for all services"""
+    
+    results = {
+        "cfn_generator": check_cfn_generator(),
+        "mainframe_analyzer": check_mainframe_analyzer(),
+        "bedrock_agents": check_bedrock_agents(),
+        "infrastructure": check_infrastructure()
+    }
+    
+    return results
+
+def check_cfn_generator():
+    """Check CFN Generator service health"""
+    lambda_client = boto3.client('lambda')
+    
+    try:
+        response = lambda_client.invoke(
+            FunctionName='CFNGenerator-Status-dev',
+            Payload=json.dumps({"health_check": True})
+        )
+        return {"status": "healthy", "response_code": response['StatusCode']}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
+# Run health check
+if __name__ == "__main__":
+    health_status = check_service_health()
+    print(json.dumps(health_status, indent=2))
+```
+
+## Troubleshooting
+
+### Common Deployment Issues
+
+#### 1. CloudFormation Stack Failures
+
+**Issue**: Stack deployment fails with resource creation errors
+```bash
+# Check stack events for detailed error information
 aws cloudformation describe-stack-events \
-  --stack-name mainframe-modernization-platform-dev \
-  --region us-east-1
+  --stack-name mainframe-modernization-dev \
+  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`]'
 ```
 
-2. **Check Lambda Logs:**
+**Common Solutions**:
+- **IAM Permissions**: Ensure deployment role has sufficient permissions
+- **Service Quotas**: Check if service limits are exceeded
+- **Resource Names**: Verify resource names are unique and follow naming conventions
+
+#### 2. Lambda Function Deployment Issues
+
+**Issue**: Lambda functions fail to deploy or update
 ```bash
-aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/"
+# Check Lambda function configuration
+aws lambda get-function-configuration \
+  --function-name CFNGenerator-Initial-dev
+
+# Check Lambda function logs
 aws logs tail /aws/lambda/CFNGenerator-Initial-dev --follow
 ```
 
-3. **Validate Templates:**
+**Common Solutions**:
+- **Package Size**: Ensure deployment package is under 50MB
+- **Runtime Compatibility**: Verify Python version compatibility
+- **Dependencies**: Check all required dependencies are included
+
+#### 3. Bedrock Access Issues
+
+**Issue**: Bedrock model access denied
 ```bash
-aws cloudformation validate-template \
-  --template-body file://infrastructure/main.yaml
+# Check available models
+aws bedrock list-foundation-models --region us-east-1
+
+# Check model access
+aws bedrock get-foundation-model \
+  --model-identifier anthropic.claude-3-haiku-20240307-v1:0
 ```
 
-## Monitoring and Maintenance
+**Common Solutions**:
+- **Model Access**: Request access to Claude models in Bedrock console
+- **Region Availability**: Ensure models are available in deployment region
+- **Service Quotas**: Check Bedrock service quotas
 
-### CloudWatch Monitoring
+#### 4. S3 Access Issues
 
-The platform creates CloudWatch log groups for all Lambda functions:
-- `/aws/lambda/CFNGenerator-*`
-- `/aws/lambda/MainframeAnalyzer-*`
-- `/aws/bedrock/agents/*`
-
-### Cost Optimization
-
-- Use inference profiles for cost-effective Bedrock access
-- Set appropriate S3 lifecycle policies
-- Monitor Lambda execution costs
-- Use reserved concurrency if needed
-
-### Updates and Maintenance
-
-To update the platform:
-
+**Issue**: S3 bucket access denied or not found
 ```bash
-# Update all services
-./scripts/deploy-all.sh --region us-east-1 --env dev
+# Check bucket existence and permissions
+aws s3 ls s3://mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text)
 
-# Update specific service
-./scripts/deploy-service.sh --service cfn-generator --region us-east-1 --env dev
+# Check bucket policy
+aws s3api get-bucket-policy \
+  --bucket mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text)
 ```
 
-## Security Considerations
+**Common Solutions**:
+- **Bucket Naming**: Ensure bucket names are globally unique
+- **Region Consistency**: Verify bucket and services are in same region
+- **IAM Policies**: Check Lambda execution roles have S3 access
 
-### IAM Roles and Policies
-- All services use least-privilege IAM roles
-- Cross-service access is controlled via IAM policies
-- No hardcoded credentials in code
+### Debugging Tools
 
-### Data Encryption
-- All S3 data encrypted at rest
-- DynamoDB tables use encryption
-- All API calls use HTTPS/TLS
+#### 1. CloudFormation Drift Detection
+```bash
+# Detect configuration drift
+aws cloudformation detect-stack-drift \
+  --stack-name mainframe-modernization-dev
 
-### Network Security
-- Services can be deployed in VPC for additional isolation
-- Security groups control network access
-- VPC endpoints available for AWS service access
+# Get drift detection results
+aws cloudformation describe-stack-drift-detection-status \
+  --stack-drift-detection-id <detection-id>
+```
 
-## Next Steps
+#### 2. Lambda Function Testing
+```bash
+# Test Lambda function locally using SAM
+sam local invoke CFNGeneratorInitial \
+  --event tests/events/cfn-generator-event.json
 
-After successful deployment:
+# Test with different payloads
+sam local invoke MainframeAnalyzerInitial \
+  --event tests/events/mainframe-analyzer-event.json
+```
 
-1. **Test the Platform:**
-   - Navigate to Bedrock console
-   - Test the Supervisor Agent
-   - Try sample interactions
+#### 3. Step Functions Execution Debugging
+```bash
+# List Step Functions executions
+aws stepfunctions list-executions \
+  --state-machine-arn arn:aws:states:us-east-1:account:stateMachine:CFNGenerator-dev
 
-2. **Upload Sample Data:**
-   - Upload resource configurations to S3
-   - Upload mainframe documentation to S3
+# Get execution details
+aws stepfunctions describe-execution \
+  --execution-arn <execution-arn>
 
-3. **Monitor Usage:**
-   - Check CloudWatch logs
-   - Monitor costs in Cost Explorer
-   - Set up CloudWatch alarms
+# Get execution history
+aws stepfunctions get-execution-history \
+  --execution-arn <execution-arn>
+```
 
-4. **Scale as Needed:**
-   - Adjust Lambda memory/timeout settings
-   - Configure provisioned concurrency
-   - Set up additional environments
+### Log Analysis
 
-For detailed usage instructions, see the [User Guide](../README.md#usage).
+#### Centralized Logging Query
+```bash
+# Query CloudWatch Insights for errors across all services
+aws logs start-query \
+  --log-group-names \
+    "/aws/lambda/CFNGenerator-Initial-dev" \
+    "/aws/lambda/MainframeAnalyzer-Initial-dev" \
+  --start-time $(date -d '1 hour ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string 'fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc'
+```
+
+## Maintenance and Updates
+
+### Regular Maintenance Tasks
+
+#### 1. Update Lambda Functions
+```bash
+# Update function code
+aws lambda update-function-code \
+  --function-name CFNGenerator-Initial-dev \
+  --zip-file fileb://cfn-generator-functions.zip
+
+# Update function configuration
+aws lambda update-function-configuration \
+  --function-name CFNGenerator-Initial-dev \
+  --memory-size 2048 \
+  --timeout 600
+```
+
+#### 2. Update Bedrock Agent Prompts
+```bash
+# Update prompts in Parameter Store
+./scripts/upload-prompts.sh --env dev --update
+
+# Update agent configuration
+aws bedrock-agent update-agent \
+  --agent-id <agent-id> \
+  --agent-name "MainframeModernization-Supervisor-dev" \
+  --instruction "$(cat prompts/supervisor-instructions.txt)"
+```
+
+#### 3. Monitor and Optimize Costs
+```bash
+# Generate cost report
+aws ce get-cost-and-usage \
+  --time-period Start=2025-07-01,End=2025-07-31 \
+  --granularity MONTHLY \
+  --metrics BlendedCost \
+  --group-by Type=DIMENSION,Key=SERVICE
+
+# Optimize Lambda memory settings based on usage
+./scripts/optimize-lambda-memory.sh --env dev
+```
+
+### Backup and Recovery
+
+#### 1. Configuration Backup
+```bash
+# Backup CloudFormation templates
+aws s3 sync infrastructure/ \
+  s3://mainframe-transform-dev-backup/infrastructure/
+
+# Backup Parameter Store configuration
+aws ssm get-parameters-by-path \
+  --path "/mainframe-modernization" \
+  --recursive > parameter-store-backup.json
+```
+
+#### 2. Data Backup
+```bash
+# Enable S3 versioning and cross-region replication
+aws s3api put-bucket-versioning \
+  --bucket mainframe-transform-dev-$(aws sts get-caller-identity --query Account --output text) \
+  --versioning-configuration Status=Enabled
+
+# Enable DynamoDB point-in-time recovery
+aws dynamodb update-continuous-backups \
+  --table-name MainframeModernization-Jobs-dev \
+  --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true
+```
+
+### Version Management
+
+#### 1. Semantic Versioning
+```bash
+# Tag releases
+git tag -a v1.0.0 -m "Initial production release"
+git push origin v1.0.0
+
+# Deploy specific version
+./scripts/deploy-all.sh \
+  --region us-east-1 \
+  --env prod \
+  --version v1.0.0
+```
+
+#### 2. Rollback Procedures
+```bash
+# Rollback CloudFormation stack
+aws cloudformation cancel-update-stack \
+  --stack-name mainframe-modernization-prod
+
+# Rollback to previous Lambda version
+aws lambda update-function-code \
+  --function-name CFNGenerator-Initial-prod \
+  --zip-file fileb://previous-version.zip
+```
+
+This deployment guide provides comprehensive instructions for deploying and maintaining the Mainframe Modernization Platform across different environments and scenarios. Follow the appropriate sections based on your specific deployment requirements and environment constraints.
