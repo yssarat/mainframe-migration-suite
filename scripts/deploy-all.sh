@@ -4,6 +4,17 @@
 # This script deploys all services and infrastructure components
 # FIXED VERSION - Resolves "No pre-built Lambda packages in the dist directory" error
 
+# Prerequisites:
+# - AWS CLI configured with appropriate credentials
+# - Python 3.9+ for Lambda layer creation
+# - jq (JSON processor) for S3 cleanup operations
+#   Installation:
+#   - macOS: brew install jq
+#   - Ubuntu/Debian: sudo apt-get install jq
+#   - CentOS/RHEL: sudo yum install jq
+#   - Amazon Linux: sudo yum install jq
+#   - Windows: Download from https://stedolan.github.io/jq/download/
+
 set -e
 
 # Default values
@@ -56,6 +67,90 @@ usage() {
     echo "  $0 --env prod --region us-west-2 --profile production"
     echo "  $0 --env dev --no-clean-buckets  # Keep existing buckets"
     echo "  $0 --env dev --no-clean-agents   # Keep existing agent aliases"
+}
+
+# Function to check prerequisites
+check_prerequisites() {
+    print_status "Checking prerequisites..."
+    
+    local missing_deps=()
+    
+    # Check AWS CLI
+    if ! command -v aws &> /dev/null; then
+        missing_deps+=("aws-cli")
+        print_error "AWS CLI is not installed"
+    fi
+    
+    # Check Python 3
+    if ! command -v python3 &> /dev/null; then
+        missing_deps+=("python3")
+        print_error "Python 3 is not installed"
+    else
+        local python_version
+        python_version=$(python3 --version 2>&1 | cut -d' ' -f2)
+        local major_version=$(echo "$python_version" | cut -d'.' -f1)
+        local minor_version=$(echo "$python_version" | cut -d'.' -f2)
+        
+        if [[ $major_version -lt 3 ]] || [[ $major_version -eq 3 && $minor_version -lt 9 ]]; then
+            missing_deps+=("python3.9+")
+            print_error "Python 3.9+ is required (found: $python_version)"
+        fi
+    fi
+    
+    # Check jq
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+        print_error "jq is not installed (required for S3 cleanup operations)"
+    fi
+    
+    # Check pip
+    if ! command -v pip3 &> /dev/null && ! command -v pip &> /dev/null; then
+        missing_deps+=("pip")
+        print_error "pip is not installed (required for Python dependencies)"
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        print_error "Missing required dependencies: ${missing_deps[*]}"
+        echo ""
+        print_status "Installation instructions:"
+        
+        for dep in "${missing_deps[@]}"; do
+            case $dep in
+                "aws-cli")
+                    echo "  AWS CLI:"
+                    echo "    - macOS: brew install awscli"
+                    echo "    - Linux: curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip' && unzip awscliv2.zip && sudo ./aws/install"
+                    echo "    - Windows: Download from https://aws.amazon.com/cli/"
+                    ;;
+                "python3" | "python3.9+")
+                    echo "  Python 3.9+:"
+                    echo "    - macOS: brew install python@3.9"
+                    echo "    - Ubuntu/Debian: sudo apt-get install python3.9 python3.9-venv python3.9-pip"
+                    echo "    - CentOS/RHEL: sudo yum install python39 python39-pip"
+                    echo "    - Amazon Linux 2: sudo amazon-linux-extras install python3.8"
+                    ;;
+                "jq")
+                    echo "  jq (JSON processor):"
+                    echo "    - macOS: brew install jq"
+                    echo "    - Ubuntu/Debian: sudo apt-get install jq"
+                    echo "    - CentOS/RHEL: sudo yum install jq"
+                    echo "    - Amazon Linux: sudo yum install jq"
+                    echo "    - Windows: Download from https://stedolan.github.io/jq/download/"
+                    ;;
+                "pip")
+                    echo "  pip (Python package manager):"
+                    echo "    - Usually comes with Python 3.9+"
+                    echo "    - Manual install: curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py"
+                    ;;
+            esac
+            echo ""
+        done
+        
+        print_error "Please install the missing dependencies and try again."
+        exit 1
+    fi
+    
+    print_success "All prerequisites are installed"
 }
 
 # Parse command line arguments
@@ -118,6 +213,9 @@ fi
 # Get AWS account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --profile "${PROFILE:-}")
 print_status "Deploying to AWS Account: $ACCOUNT_ID in region: $REGION"
+
+# Check prerequisites before starting deployment
+check_prerequisites
 
 # Change to script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

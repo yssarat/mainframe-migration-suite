@@ -4,6 +4,15 @@
 # This script removes all AWS resources, local artifacts, and temporary files
 # created during deployment and development
 
+# Prerequisites:
+# - AWS CLI configured with appropriate credentials
+# - jq (JSON processor) for handling S3 versioned objects
+#   Installation:
+#   - macOS: brew install jq
+#   - Ubuntu/Debian: sudo apt-get install jq
+#   - CentOS/RHEL: sudo yum install jq
+#   - Windows: Download from https://stedolan.github.io/jq/download/
+
 set -e
 
 # Default values
@@ -155,19 +164,20 @@ print_status "Local Only: $CLEAN_LOCAL_ONLY"
 print_status "AWS Only: $CLEAN_AWS_ONLY"
 echo ""
 
-# Confirmation prompt
+# Safety confirmation
 if [[ "$FORCE_DELETE" != "true" ]]; then
     print_warning "This will permanently delete AWS resources and local files."
     print_warning "This action cannot be undone!"
     echo ""
-    read -p "Are you sure you want to proceed? (yes/no): " confirm
-    if [[ "$confirm" != "yes" ]]; then
-        print_status "Cleanup cancelled."
+    echo -n "Do you want to continue? (y/N): "
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        print_status "Cleanup cancelled by user"
         exit 0
     fi
 fi
 
-# Function to safely delete S3 bucket and its contents
+# Improved function to safely delete S3 bucket and its contents
 delete_s3_bucket() {
     local bucket_name="$1"
     local aws_cmd="aws"
@@ -176,29 +186,91 @@ delete_s3_bucket() {
         aws_cmd="aws --profile $PROFILE"
     fi
     
-    if $aws_cmd s3 ls "s3://${bucket_name}" >/dev/null 2>&1; then
-        print_status "Deleting S3 bucket and contents: ${bucket_name}"
-        
-        # Delete all objects and versions first
-        $aws_cmd s3 rm "s3://${bucket_name}" --recursive >/dev/null 2>&1 || true
-        
-        # Delete any versioned objects
-        $aws_cmd s3api delete-objects --bucket "${bucket_name}" \
-            --delete "$($aws_cmd s3api list-object-versions --bucket "${bucket_name}" \
-            --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
-            --output json)" >/dev/null 2>&1 || true
-        
-        # Delete any delete markers
-        $aws_cmd s3api delete-objects --bucket "${bucket_name}" \
-            --delete "$($aws_cmd s3api list-object-versions --bucket "${bucket_name}" \
-            --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
-            --output json)" >/dev/null 2>&1 || true
-        
-        # Finally delete the bucket
-        $aws_cmd s3 rb "s3://${bucket_name}" >/dev/null 2>&1 || true
-        print_success "Deleted S3 bucket: ${bucket_name}"
-    else
+    # Check if bucket exists
+    if ! $aws_cmd s3 ls "s3://${bucket_name}" >/dev/null 2>&1; then
         print_status "S3 bucket does not exist: ${bucket_name}"
+        return 0
+    fi
+    
+    print_status "Deleting S3 bucket and contents: ${bucket_name}"
+    
+    # Step 1: Delete all current objects
+    print_status "  - Removing all current objects..."
+    $aws_cmd s3 rm "s3://${bucket_name}" --recursive 2>/dev/null || true
+    
+    # Step 2: Handle versioned objects if versioning is enabled
+    print_status "  - Checking for versioned objects..."
+    
+    # Get all object versions
+    local versions_json
+    versions_json=$($aws_cmd s3api list-object-versions --bucket "${bucket_name}" --output json 2>/dev/null || echo '{}')
+    
+    # Delete all versions if they exist
+    local versions_count
+    versions_count=$(echo "$versions_json" | jq -r '.Versions // [] | length' 2>/dev/null || echo "0")
+    
+    if [[ "$versions_count" -gt 0 ]]; then
+        print_status "  - Deleting $versions_count object versions..."
+        local delete_versions
+        delete_versions=$(echo "$versions_json" | jq -c '{Objects: [.Versions[]? | {Key: .Key, VersionId: .VersionId}]}' 2>/dev/null)
+        
+        if [[ "$delete_versions" != "null" && "$delete_versions" != "{\"Objects\":[]}" ]]; then
+            $aws_cmd s3api delete-objects --bucket "${bucket_name}" --delete "$delete_versions" >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Step 3: Delete all delete markers
+    local markers_count
+    markers_count=$(echo "$versions_json" | jq -r '.DeleteMarkers // [] | length' 2>/dev/null || echo "0")
+    
+    if [[ "$markers_count" -gt 0 ]]; then
+        print_status "  - Deleting $markers_count delete markers..."
+        local delete_markers
+        delete_markers=$(echo "$versions_json" | jq -c '{Objects: [.DeleteMarkers[]? | {Key: .Key, VersionId: .VersionId}]}' 2>/dev/null)
+        
+        if [[ "$delete_markers" != "null" && "$delete_markers" != "{\"Objects\":[]}" ]]; then
+            $aws_cmd s3api delete-objects --bucket "${bucket_name}" --delete "$delete_markers" >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Step 4: Handle incomplete multipart uploads
+    print_status "  - Cleaning up incomplete multipart uploads..."
+    local uploads
+    uploads=$($aws_cmd s3api list-multipart-uploads --bucket "${bucket_name}" --output json 2>/dev/null || echo '{}')
+    local uploads_count
+    uploads_count=$(echo "$uploads" | jq -r '.Uploads // [] | length' 2>/dev/null || echo "0")
+    
+    if [[ "$uploads_count" -gt 0 ]]; then
+        print_status "  - Aborting $uploads_count incomplete multipart uploads..."
+        echo "$uploads" | jq -r '.Uploads[]? | "\(.Key) \(.UploadId)"' | while read -r key upload_id; do
+            if [[ -n "$key" && -n "$upload_id" ]]; then
+                $aws_cmd s3api abort-multipart-upload --bucket "${bucket_name}" --key "$key" --upload-id "$upload_id" 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # Step 5: Wait a moment for eventual consistency
+    sleep 2
+    
+    # Step 6: Verify bucket is empty before deletion
+    local remaining_objects
+    remaining_objects=$($aws_cmd s3 ls "s3://${bucket_name}" --recursive 2>/dev/null | wc -l || echo "0")
+    
+    if [[ "$remaining_objects" -gt 0 ]]; then
+        print_warning "  - Bucket still contains $remaining_objects objects, attempting force cleanup..."
+        # Try one more aggressive cleanup
+        $aws_cmd s3 rm "s3://${bucket_name}" --recursive --quiet 2>/dev/null || true
+        sleep 1
+    fi
+    
+    # Step 7: Finally delete the bucket
+    print_status "  - Deleting empty bucket..."
+    if $aws_cmd s3 rb "s3://${bucket_name}" 2>/dev/null; then
+        print_success "Successfully deleted S3 bucket: ${bucket_name}"
+    else
+        print_error "Failed to delete S3 bucket: ${bucket_name}"
+        print_error "You may need to manually delete this bucket from the AWS Console"
+        return 1
     fi
 }
 
